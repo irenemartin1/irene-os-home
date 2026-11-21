@@ -57,6 +57,24 @@ sleep 4; shot 10-recents
 adb shell input keyevent KEYCODE_HOME
 sleep 4; shot 11-final; top 11-top
 
+# 7b. turn on gesture navigation (like the Pixel) and do the system swipe-home from the bottom edge
+adb shell cmd overlay enable com.android.internal.systemui.navbar.gestural
+sleep 4
+adb shell am start -a android.settings.SETTINGS
+sleep 4
+adb shell input swipe $CX $((H - 3)) $CX $((H / 2)) 300
+sleep 5; shot 12-after-system-swipe-home; top 12-top
+adb shell input swipe $CX $((H - 3)) $CX $((H * 6 / 10)) 300
+sleep 4; shot 13-system-swipe-on-home
+adb shell input keyevent KEYCODE_HOME
+sleep 3
+# swipe up from the middle with gesture nav on -> app drawer
+adb shell input swipe $CX $((H * 6 / 10)) $CX $((H * 25 / 100)) 250
+sleep 3; shot 14-drawer-gesture-nav
+adb shell input keyevent KEYCODE_BACK
+sleep 2
+adb shell dumpsys wallpaper | grep -iE "mWidth|mHeight|wallpaper" | head -8 > "$OUT/wallpaper.txt"
+
 # 8. let it run a while, then check it is still alive + smooth
 sleep 20
 adb shell pidof app.irene.pastel > "$OUT/pid.txt"
