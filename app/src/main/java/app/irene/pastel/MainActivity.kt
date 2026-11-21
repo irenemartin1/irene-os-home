@@ -2,6 +2,7 @@ package app.irene.pastel
 
 import android.app.Activity
 import android.app.AlertDialog
+import android.app.WallpaperManager
 import android.content.BroadcastReceiver
 import android.content.ComponentName
 import android.content.Context
@@ -9,6 +10,8 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.AdaptiveIconDrawable
@@ -82,6 +85,9 @@ class MainActivity : Activity() {
     private lateinit var noteCard: TextView
     private lateinit var hintText: TextView
     private lateinit var dock: LinearLayout
+    private lateinit var homeGrid: LinearLayout
+    private lateinit var pageDots: TextView
+    private var homePage = 0
     private lateinit var search: EditText
     private lateinit var grid: GridView
     private val adapter = AppAdapter()
@@ -151,6 +157,7 @@ class MainActivity : Activity() {
         super.onResume()
         if (underwater) ocean.start() else bg.start()
         updateClock()
+        homeLayer.postDelayed({ syncWallpaper() }, 1500)
         // shake 3x to toggle underwater mode
         sensors.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)?.let {
             sensors.registerListener(shake, it, SensorManager.SENSOR_DELAY_UI)
@@ -183,6 +190,7 @@ class MainActivity : Activity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         if (drawerOpen) closeDrawer()
+        else if (homePage != 0) { homePage = 0; refreshHome() } // Home press -> back to page 1
     }
 
     @Deprecated("fine for a launcher")
@@ -208,7 +216,10 @@ class MainActivity : Activity() {
             MotionEvent.ACTION_MOVE -> if (trackSwipe && !swipeDone) {
                 val dy = ev.rawY - downY
                 val dx = ev.rawX - downX
-                if (abs(dy) > dp(60) && abs(dy) > abs(dx) * 1.4f) {
+                if (!drawerOpen && abs(dx) > dp(60) && abs(dx) > abs(dy) * 1.4f) {
+                    swipeDone = true
+                    turnPage(if (dx < 0) 1 else -1) // swipe left/right = next/previous home page
+                } else if (abs(dy) > dp(60) && abs(dy) > abs(dx) * 1.4f) {
                     if (!drawerOpen) {
                         swipeDone = true
                         if (dy < 0) openDrawer() else expandNotifications()
@@ -216,6 +227,8 @@ class MainActivity : Activity() {
                         swipeDone = true
                         closeDrawer()
                     }
+                }
+                if (true) { // (block kept for the early return below)
                     if (swipeDone) { // tell the views underneath the touch is over
                         val cancel = MotionEvent.obtain(ev)
                         cancel.action = MotionEvent.ACTION_CANCEL
@@ -244,7 +257,7 @@ class MainActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
         }
-        homeLayer.addView(View(this), LinearLayout.LayoutParams(1, 0, 0.6f))
+        homeLayer.addView(View(this), LinearLayout.LayoutParams(1, dp(28)))
 
         // Your fairy logo: drop it in res/drawable as fairy_logo.png and it shows up here
         logo = ImageView(this).apply {
@@ -262,7 +275,7 @@ class MainActivity : Activity() {
         }
         homeLayer.addView(brandText)
 
-        clockText = title(84f).apply {
+        clockText = title(72f).apply {
             letterSpacing = -0.03f
             setOnLongClickListener { launchIntent(Intent(AlarmClock.ACTION_SHOW_ALARMS)); true }
         }
@@ -284,12 +297,24 @@ class MainActivity : Activity() {
         homeLayer.addView(greetText)
         homeLayer.addView(noteCard, LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT
-        ).apply { topMargin = dp(22) })
+        ).apply { topMargin = dp(12) })
 
-        homeLayer.addView(View(this), LinearLayout.LayoutParams(1, 0, 1.2f))
+        // HOME SCREEN PAGES: your apps in a grid; swipe left / right between pages
+        homeGrid = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_HORIZONTAL
+            addOnLayoutChangeListener { _, _, top, _, bottom, _, oldTop, _, oldBottom ->
+                if (bottom - top != oldBottom - oldTop) post { refreshHome() }
+            }
+        }
+        homeLayer.addView(homeGrid, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f).apply {
+            setMargins(dp(12), dp(14), dp(12), 0)
+        })
+        pageDots = text(12f).apply { letterSpacing = 0.3f }
+        homeLayer.addView(pageDots)
 
         hintText = text(13f).apply {
-            text = "swipe up to enter the forest ✧"; letterSpacing = 0.05f
+            text = "swipe up for all apps ✧"; letterSpacing = 0.05f
             setPadding(dp(24), dp(10), dp(24), dp(10))
             setOnClickListener { openDrawer() } // tapping the hint opens apps too
         }
@@ -352,7 +377,7 @@ class MainActivity : Activity() {
     private fun applyPalette() {
         if (underwater) ocean.palette = palette else bg.palette = palette
         brandText.text = if (underwater) "◦ irene os ◦" else "✦ irene os ✦"
-        hintText.text = if (underwater) "swipe up to dive deeper ◦" else "swipe up to enter the forest ✧"
+        hintText.text = if (underwater) "swipe up for all apps ◦" else "swipe up for all apps ✧"
         listOf(clockText, noteCard).forEach { it.setTextColor(palette.ink) }
         listOf(dateText, greetText, hintText, brandText).forEach { it.setTextColor(palette.soft) }
         brandText.setShadowLayer(dp(8).toFloat(), 0f, 0f, palette.glow)
@@ -366,6 +391,7 @@ class MainActivity : Activity() {
         updateClock()
         refreshNote()
         refreshDock()
+        refreshHome()
         adapter.notifyDataSetChanged()
     }
 
@@ -419,8 +445,10 @@ class MainActivity : Activity() {
             runOnUiThread {
                 allApps = list
                 seedDockDefaults()
+                seedHome()
                 filter(search.text.toString())
                 refreshDock()
+                refreshHome()
             }
         }.start()
     }
@@ -535,6 +563,7 @@ class MainActivity : Activity() {
 
     private fun appMenu(anchor: View, app: AppEntry) {
         PopupMenu(this, anchor).apply {
+            menu.add(0, 99, 0, "add to home screen ✧")
             for (i in 0 until DOCK_SLOTS) menu.add(0, i, i, "pin to dock slot ${i + 1}")
             menu.add(0, 100, 100, "app info")
             menu.add(0, 101, 101, "uninstall")
@@ -542,6 +571,7 @@ class MainActivity : Activity() {
                 when (it.itemId) {
                     100 -> appInfo(app)
                     101 -> uninstall(app)
+                    99 -> addToHome(app)
                     else -> pin(app, it.itemId)
                 }
                 true
@@ -574,6 +604,7 @@ class MainActivity : Activity() {
             menu.add(0, 2, 2, "change my name")
             menu.add(0, 3, 3, "set as default home app")
             menu.add(0, 4, 4, if (underwater) "underwater mode: on ◦" else "underwater mode (or shake 3x)")
+            menu.add(0, 5, 5, if (useWallpaper) "themed phone wallpaper: on ✓" else "themed phone wallpaper: off")
             setOnMenuItemClickListener {
                 when (it.itemId) {
                     0 -> nextPalette()
@@ -583,6 +614,10 @@ class MainActivity : Activity() {
                     }
                     3 -> launchIntent(Intent(Settings.ACTION_HOME_SETTINGS))
                     4 -> toggleUnderwater()
+                    5 -> {
+                        prefs.edit().putBoolean("wallpaper", !useWallpaper).apply()
+                        if (useWallpaper) syncWallpaper(force = true)
+                    }
                 }
                 true
             }
@@ -615,6 +650,7 @@ class MainActivity : Activity() {
         prefs.edit().putInt(paletteKey, idx).apply()
         applyPalette()
         toast("${palette.spark} ${palette.name}")
+        homeLayer.postDelayed({ syncWallpaper() }, 800)
     }
 
     private fun currentPalette(): Palette =
@@ -642,6 +678,7 @@ class MainActivity : Activity() {
             toast("✦ back to the forest ✦")
         }
         applyPalette()
+        homeLayer.postDelayed({ syncWallpaper() }, 5000) // after the bubble burst settles
     }
 
     private fun appInfo(app: AppEntry) = launchIntent(
@@ -699,24 +736,165 @@ class MainActivity : Activity() {
 
         override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
             val app = shown[position]
-            val cell = (convertView as? LinearLayout) ?: LinearLayout(this@MainActivity).apply {
-                orientation = LinearLayout.VERTICAL
-                gravity = Gravity.CENTER_HORIZONTAL
-                addView(newBubble().apply { tag = "bubble" }, LinearLayout.LayoutParams(dp(58), dp(58)))
-                addView(TextView(this@MainActivity).apply {
-                    tag = "label"; textSize = 12f; maxLines = 1
-                    ellipsize = TextUtils.TruncateAt.END; gravity = Gravity.CENTER
-                    setPadding(dp(2), dp(6), dp(2), 0)
-                }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-            }
-            bindBubble(cell.findViewWithTag("bubble"), app)
-            cell.findViewWithTag<TextView>("label").apply {
-                text = app.label
-                setTextColor(palette.ink)
-                setShadowLayer(dp(6).toFloat(), 0f, 0f, palette.glow) // soft glow under the name
-            }
+            val cell = (convertView as? LinearLayout) ?: emptyCell()
+            bindCell(cell, app)
             return cell
         }
+    }
+
+    /** One app: creature icon + glowing name. Used by the drawer and the home screen. */
+    private fun emptyCell(): LinearLayout = LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL
+        gravity = Gravity.CENTER_HORIZONTAL
+        addView(newBubble().apply { tag = "bubble" }, LinearLayout.LayoutParams(dp(58), dp(58)))
+        addView(TextView(this@MainActivity).apply {
+            tag = "label"; textSize = 12f; maxLines = 1
+            ellipsize = TextUtils.TruncateAt.END; gravity = Gravity.CENTER
+            setPadding(dp(2), dp(6), dp(2), 0)
+        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+    }
+
+    private fun bindCell(cell: LinearLayout, app: AppEntry) {
+        bindBubble(cell.findViewWithTag("bubble"), app)
+        cell.findViewWithTag<TextView>("label").apply {
+            text = app.label
+            setTextColor(palette.ink)
+            setShadowLayer(dp(6).toFloat(), 0f, 0f, palette.glow) // soft glow under the name
+        }
+    }
+
+    // ───────────────────────── home screen pages ─────────────────────────
+    // Saved as an ordered list of apps; split into pages of 4 columns x however many rows fit.
+
+    private fun homeApps(): MutableList<String> =
+        prefs.getString("home_apps", "").orEmpty().split("|").filter { it.isNotBlank() }.toMutableList()
+
+    private fun saveHomeApps(list: List<String>) = prefs.edit().putString("home_apps", list.joinToString("|")).apply()
+
+    private fun pageSize(): Int = (homeGrid.height / dp(92)).coerceIn(1, 5) * 4
+
+    private fun homeEntries(): List<AppEntry> =
+        homeApps().mapNotNull { key -> allApps.firstOrNull { it.component.flattenToString() == key } }
+
+    private fun refreshHome() {
+        if (!::homeGrid.isInitialized || homeGrid.height == 0) return
+        val apps = homeEntries()
+        val size = pageSize()
+        val pages = max(1, (apps.size + size - 1) / size)
+        homePage = homePage.coerceIn(0, pages - 1)
+        homeGrid.removeAllViews()
+        apps.drop(homePage * size).take(size).chunked(4).forEach { rowApps ->
+            val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+            for (i in 0 until 4) {
+                val app = rowApps.getOrNull(i)
+                val cell: View = if (app != null) emptyCell().also { c ->
+                    bindCell(c, app)
+                    c.setOnClickListener { launch(app) }
+                    c.setOnLongClickListener { homeMenu(it, app); true }
+                } else View(this)
+                row.addView(cell, LinearLayout.LayoutParams(0, dp(92), 1f))
+            }
+            homeGrid.addView(row, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        }
+        if (apps.isEmpty() && allApps.isNotEmpty()) {
+            homeGrid.addView(text(13f).apply {
+                text = "long-press any app in the drawer → \"add to home screen\" ✧"
+                setTextColor(palette.soft)
+                setPadding(dp(24), dp(40), dp(24), 0)
+            })
+        }
+        pageDots.text = if (pages > 1) (0 until pages).joinToString("  ") { if (it == homePage) "●" else "○" } else ""
+        pageDots.setTextColor(palette.soft)
+    }
+
+    private fun turnPage(delta: Int) {
+        val size = pageSize()
+        val pages = max(1, (homeEntries().size + size - 1) / size)
+        val next = homePage + delta
+        if (next < 0 || next >= pages) return
+        homePage = next
+        refreshHome()
+        homeGrid.alpha = 0f
+        homeGrid.translationX = delta * dp(60).toFloat()
+        homeGrid.animate().alpha(1f).translationX(0f).setDuration(220).setInterpolator(DecelerateInterpolator()).start()
+    }
+
+    private fun addToHome(app: AppEntry) {
+        val list = homeApps()
+        val key = app.component.flattenToString()
+        if (key in list) { toast("already on your home screen ✧"); return }
+        list += key
+        saveHomeApps(list)
+        if (drawerOpen) closeDrawer()
+        homePage = (list.size - 1) / pageSize()
+        refreshHome()
+        toast("added ${app.label} to home ✧")
+    }
+
+    private fun homeMenu(anchor: View, app: AppEntry) {
+        PopupMenu(this, anchor).apply {
+            menu.add(0, 0, 0, "remove from home screen")
+            menu.add(0, 1, 1, "move to the front")
+            menu.add(0, 2, 2, "app info")
+            setOnMenuItemClickListener {
+                val key = app.component.flattenToString()
+                val list = homeApps()
+                when (it.itemId) {
+                    0 -> { list.remove(key); saveHomeApps(list); refreshHome() }
+                    1 -> { list.remove(key); list.add(0, key); saveHomeApps(list); homePage = 0; refreshHome() }
+                    2 -> appInfo(app)
+                }
+                true
+            }
+        }.show()
+    }
+
+    /** First run: put a few everyday apps on page 1. */
+    private fun seedHome() {
+        if (prefs.getBoolean("home_seeded", false) || allApps.isEmpty()) return
+        val wanted = listOf(
+            "com.google.android.calendar", "com.google.android.apps.maps", "com.google.android.apps.photos",
+            "com.google.android.gm", "com.google.android.youtube", "com.google.android.deskclock",
+            "com.google.android.apps.nbu.files", "com.android.settings", "com.android.chrome",
+            "com.google.android.apps.messaging", "com.google.android.dialer", "com.google.android.GoogleCamera"
+        )
+        val dockKeys = (0 until DOCK_SLOTS).mapNotNull { prefs.getString("fav$it", null) }
+        val picks = wanted.mapNotNull { p -> allApps.firstOrNull { it.component.packageName == p } }
+            .map { it.component.flattenToString() }
+            .filter { it !in dockKeys }
+            .take(8)
+        saveHomeApps(picks)
+        prefs.edit().putBoolean("home_seeded", true).apply()
+    }
+
+    // ───────────────────────── themed phone wallpaper ─────────────────────────
+
+    private val useWallpaper get() = prefs.getBoolean("wallpaper", true)
+
+    /**
+     * Paints the current scene as the phone's real wallpaper + lock screen. Android's own swipe-home
+     * animation, Recents and lock screen show the wallpaper, so this keeps those moments themed too.
+     * Only runs when the look actually changed.
+     */
+    private fun syncWallpaper(force: Boolean = false) {
+        if (!useWallpaper) return
+        val key = (if (underwater) "ocean:" else "forest:") + palette.name + ":v1"
+        if (!force && prefs.getString("wp_key", null) == key) return
+        val scene: View = if (underwater) ocean else bg
+        if (scene.width == 0 || scene.height == 0) return
+        val bmp = try {
+            Bitmap.createBitmap(scene.width, scene.height, Bitmap.Config.ARGB_8888).also { scene.draw(Canvas(it)) }
+        } catch (_: Throwable) { return }
+        prefs.edit().putString("wp_key", key).apply()
+        Thread {
+            try {
+                WallpaperManager.getInstance(applicationContext)
+                    .setBitmap(bmp, null, true, WallpaperManager.FLAG_SYSTEM or WallpaperManager.FLAG_LOCK)
+            } catch (_: Throwable) {
+                prefs.edit().remove("wp_key").apply()
+            }
+            bmp.recycle()
+        }.start()
     }
 
     // ───────────────────────── helpers ─────────────────────────
