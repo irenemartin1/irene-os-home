@@ -255,7 +255,11 @@ class MainActivity : Activity() {
 
         homeLayer.addView(View(this), LinearLayout.LayoutParams(1, 0, 1.2f))
 
-        hintText = text(13f).apply { text = "swipe up to enter the forest ✧"; letterSpacing = 0.05f }
+        hintText = text(13f).apply {
+            text = "swipe up to enter the forest ✧"; letterSpacing = 0.05f
+            setPadding(dp(24), dp(10), dp(24), dp(10))
+            setOnClickListener { openDrawer() } // tapping the hint opens apps too
+        }
         homeLayer.addView(hintText)
 
         dock = LinearLayout(this).apply {
