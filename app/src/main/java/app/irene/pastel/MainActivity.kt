@@ -1,6 +1,9 @@
 package app.irene.pastel
 
 import android.app.Activity
+import android.animation.Animator
+import android.animation.AnimatorListenerAdapter
+import android.animation.ValueAnimator
 import android.app.AlertDialog
 import android.app.WallpaperManager
 import android.content.BroadcastReceiver
@@ -34,6 +37,7 @@ import android.view.GestureDetector
 import android.view.Gravity
 import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
+import android.view.VelocityTracker
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowInsets
@@ -173,10 +177,11 @@ class MainActivity : Activity() {
     override fun onStop() {
         super.onStop()
         // coming back home should always land on the home screen, not the drawer
-        if (drawerOpen) {
+        if (drawerOpen || drawerProgress > 0f) {
+            drawerAnim?.cancel()
             drawerOpen = false; pickingSlot = -1
+            setDrawerProgress(0f)
             drawerLayer.visibility = View.GONE
-            homeLayer.alpha = 1f
         }
     }
 
@@ -199,48 +204,78 @@ class MainActivity : Activity() {
     }
 
     // ── swipe handling ──
-    // Our own swipe tracking (works even when the phone is busy). Touches that start in Android's
-    // gesture strip at the very bottom are left alone, so the system Home gesture never fights us.
+    // Works like the Pixel launcher: the app drawer follows your finger as you drag up (or down to
+    // close), and a quick flick finishes it. Android owns the thin gesture strip at the very bottom
+    // (Home / Recents), so swipes are tracked from anywhere just above it — including on the dock.
     private var downX = 0f
     private var downY = 0f
     private var trackSwipe = false
-    private var swipeDone = false
+    private var dragMode = 0          // 0 = deciding, 1 = pulling drawer up, 2 = pushing drawer down, 3 = gesture used
+    private var tracker: VelocityTracker? = null
+    private var gestureStrip = 0      // height of Android's own bottom gesture area (px)
 
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        if (ev.actionMasked == MotionEvent.ACTION_DOWN) {
+            downX = ev.rawX; downY = ev.rawY; dragMode = 0
+            val screenH = window.decorView.height
+            trackSwipe = screenH == 0 || ev.rawY < screenH - gestureStrip - dp(4)
+            tracker?.recycle()
+            tracker = VelocityTracker.obtain()
+            if (underwater && !drawerOpen) ocean.puff(ev.x, ev.y)
+        }
+        tracker?.addMovement(ev)
+        if (!trackSwipe) return super.dispatchTouchEvent(ev)
+
+        val dy = ev.rawY - downY
+        val dx = ev.rawX - downX
         when (ev.actionMasked) {
-            MotionEvent.ACTION_DOWN -> {
-                downX = ev.rawX; downY = ev.rawY; swipeDone = false
-                trackSwipe = ev.rawY < resources.displayMetrics.heightPixels - dp(48)
-                if (underwater && !drawerOpen) ocean.puff(ev.x, ev.y)
+            MotionEvent.ACTION_MOVE -> {
+                if (dragMode == 0) {
+                    val slop = dp(12)
+                    if (abs(dy) > slop && abs(dy) > abs(dx) * 1.2f) {
+                        if (!drawerOpen && dy < 0) { dragMode = 1; beginDrawerDrag() }
+                        else if (drawerOpen && dy > 0 && !grid.canScrollVertically(-1)) { dragMode = 2; drawerAnim?.cancel() }
+                        else if (!drawerOpen && dy > dp(50)) { dragMode = 3; expandNotifications() }
+                    } else if (!drawerOpen && abs(dx) > dp(50) && abs(dx) > abs(dy) * 1.4f) {
+                        dragMode = 3
+                        turnPage(if (dx < 0) 1 else -1) // swipe left / right = next / previous home page
+                    }
+                    if (dragMode != 0) cancelTouchFor(ev)
+                }
+                val range = drawerRange()
+                when (dragMode) {
+                    1 -> setDrawerProgress(((-dy - dp(12)) / range).coerceIn(0f, 1f))
+                    2 -> setDrawerProgress((1f - (dy - dp(12)) / range).coerceIn(0f, 1f))
+                }
+                if (dragMode != 0) return true
             }
-            MotionEvent.ACTION_MOVE -> if (trackSwipe && !swipeDone) {
-                val dy = ev.rawY - downY
-                val dx = ev.rawX - downX
-                if (!drawerOpen && abs(dx) > dp(60) && abs(dx) > abs(dy) * 1.4f) {
-                    swipeDone = true
-                    turnPage(if (dx < 0) 1 else -1) // swipe left/right = next/previous home page
-                } else if (abs(dy) > dp(60) && abs(dy) > abs(dx) * 1.4f) {
-                    if (!drawerOpen) {
-                        swipeDone = true
-                        if (dy < 0) openDrawer() else expandNotifications()
-                    } else if (dy > 0 && !grid.canScrollVertically(-1)) {
-                        swipeDone = true
-                        closeDrawer()
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                if (dragMode == 1 || dragMode == 2) {
+                    tracker?.computeCurrentVelocity(1000)
+                    val vy = tracker?.yVelocity ?: 0f
+                    val open = when {
+                        vy < -dp(700) -> true                 // flicked up
+                        vy > dp(700) -> false                 // flicked down
+                        dragMode == 1 -> drawerProgress > 0.3f
+                        else -> drawerProgress > 0.7f
                     }
+                    settleDrawer(open)
                 }
-                if (true) { // (block kept for the early return below)
-                    if (swipeDone) { // tell the views underneath the touch is over
-                        val cancel = MotionEvent.obtain(ev)
-                        cancel.action = MotionEvent.ACTION_CANCEL
-                        super.dispatchTouchEvent(cancel)
-                        cancel.recycle()
-                        return true
-                    }
-                }
+                val used = dragMode != 0
+                dragMode = 0
+                tracker?.recycle(); tracker = null
+                if (used) return true
             }
         }
-        if (swipeDone) return true
         return super.dispatchTouchEvent(ev)
+    }
+
+    /** Tells the views under the finger that this touch became a swipe (so nothing gets tapped). */
+    private fun cancelTouchFor(ev: MotionEvent) {
+        val cancel = MotionEvent.obtain(ev)
+        cancel.action = MotionEvent.ACTION_CANCEL
+        super.dispatchTouchEvent(cancel)
+        cancel.recycle()
     }
 
     // ───────────────────────── UI ─────────────────────────
@@ -367,6 +402,7 @@ class MainActivity : Activity() {
         root.setOnApplyWindowInsetsListener { _, insets ->
             val bars = insets.getInsets(WindowInsets.Type.systemBars())
             val ime = insets.getInsets(WindowInsets.Type.ime())
+            gestureStrip = insets.getInsets(WindowInsets.Type.mandatorySystemGestures()).bottom
             homeLayer.setPadding(0, bars.top, 0, bars.bottom)
             drawerLayer.setPadding(dp(16), bars.top, dp(16), max(bars.bottom, ime.bottom))
             insets
@@ -529,26 +565,60 @@ class MainActivity : Activity() {
     // ───────────────────────── drawer ─────────────────────────
 
     private fun openDrawer(pick: Int = -1) {
+        beginDrawerDrag()
         pickingSlot = pick
-        search.setText("")
         search.hint = if (pick >= 0) "pick an app for slot ${pick + 1} ✧" else "search the forest ⋆˚✿"
-        drawerOpen = true
-        grid.setSelection(0)
-        drawerLayer.visibility = View.VISIBLE
-        drawerLayer.alpha = 0f
-        drawerLayer.translationY = dp(60).toFloat()
-        drawerLayer.animate().alpha(1f).translationY(0f).setDuration(240)
-            .setInterpolator(DecelerateInterpolator()).start()
-        homeLayer.animate().alpha(0f).setDuration(180).start()
+        settleDrawer(true)
     }
 
-    private fun closeDrawer() {
-        drawerOpen = false
-        pickingSlot = -1
-        hideKeyboard()
-        drawerLayer.animate().alpha(0f).translationY(dp(60).toFloat()).setDuration(180)
-            .withEndAction { if (!drawerOpen) drawerLayer.visibility = View.GONE }.start()
-        homeLayer.animate().alpha(1f).setDuration(220).start()
+    private fun closeDrawer() = settleDrawer(false)
+
+    // ── drawer motion (shared by taps, swipes and the Home button) ──
+    private var drawerProgress = 0f       // 0 = closed, 1 = fully open
+    private var drawerAnim: ValueAnimator? = null
+
+    /** How far your finger travels to fully open the drawer. */
+    private fun drawerRange(): Float {
+        val h = if (homeLayer.height > 0) homeLayer.height else resources.displayMetrics.heightPixels
+        return h * 0.45f
+    }
+
+    private fun beginDrawerDrag() {
+        drawerAnim?.cancel()
+        if (!drawerOpen && drawerProgress == 0f) {
+            pickingSlot = -1
+            search.setText("")
+            search.hint = "search the forest ⋆˚✿"
+            grid.setSelection(0)
+        }
+    }
+
+    private fun setDrawerProgress(p: Float) {
+        drawerProgress = p
+        val range = drawerRange()
+        drawerLayer.visibility = if (p > 0f) View.VISIBLE else View.GONE
+        drawerLayer.alpha = p
+        drawerLayer.translationY = (1f - p) * range
+        homeLayer.alpha = 1f - p
+        homeLayer.translationY = -p * dp(36)
+    }
+
+    private fun settleDrawer(open: Boolean) {
+        drawerAnim?.cancel()
+        drawerOpen = open
+        if (!open) { pickingSlot = -1; hideKeyboard() }
+        val target = if (open) 1f else 0f
+        drawerAnim = ValueAnimator.ofFloat(drawerProgress, target).apply {
+            duration = (260 * abs(target - drawerProgress)).toLong().coerceAtLeast(90)
+            interpolator = DecelerateInterpolator(1.6f)
+            addUpdateListener { setDrawerProgress(it.animatedValue as Float) }
+            addListener(object : AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: Animator) {
+                    if (!drawerOpen) drawerLayer.visibility = View.GONE
+                }
+            })
+            start()
+        }
     }
 
     private fun expandNotifications() {
