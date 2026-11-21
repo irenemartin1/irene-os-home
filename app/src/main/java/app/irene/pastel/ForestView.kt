@@ -20,7 +20,9 @@ import kotlin.random.Random
  * Irene OS fairy-forest background:
  * night sky gradient → twinkling stars → drifting purple mist →
  * tree + mushroom silhouettes → fireflies floating up.
- * Runs ~20fps and stops when you leave home, so it's light on battery.
+ *
+ * Performance: everything that doesn't move (sky gradient, trees, ground, mushrooms) is drawn ONCE
+ * into a cached picture; each frame only draws the small moving bits. ~20fps, stops when you leave home.
  */
 class ForestView(context: Context) : View(context) {
 
@@ -28,11 +30,12 @@ class ForestView(context: Context) : View(context) {
         set(value) {
             field = value
             glowPaint.colorFilter = PorterDuffColorFilter(value.glow, PorterDuff.Mode.SRC_IN)
+            cachedFor = null
             invalidate()
         }
 
     private val skyPaint = Paint()
-    private val mistPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val mistPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
     private val starPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val groundPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val glowPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
@@ -51,12 +54,24 @@ class ForestView(context: Context) : View(context) {
     private val flies = mutableListOf<Fly>()
     private val stars = mutableListOf<FloatArray>() // x, y, r, phase
 
+    // soft round glow, tinted per use (fireflies + mist) — no gradients rebuilt per frame
     private val glowBitmap: Bitmap = Bitmap.createBitmap(64, 64, Bitmap.Config.ARGB_8888).also { bmp ->
         val p = Paint(Paint.ANTI_ALIAS_FLAG)
         p.shader = RadialGradient(32f, 32f, 32f, intArrayOf(0xFFFFFFFF.toInt(), 0x55FFFFFF, 0x00FFFFFF), floatArrayOf(0f, 0.35f, 1f), Shader.TileMode.CLAMP)
         Canvas(bmp).drawCircle(32f, 32f, 32f, p)
     }
+    private val mistBitmap: Bitmap = Bitmap.createBitmap(128, 128, Bitmap.Config.ARGB_8888).also { bmp ->
+        val p = Paint(Paint.ANTI_ALIAS_FLAG)
+        p.shader = RadialGradient(64f, 64f, 64f, intArrayOf(0x78FFFFFF, 0x00FFFFFF), null, Shader.TileMode.CLAMP)
+        Canvas(bmp).drawCircle(64f, 64f, 64f, p)
+    }
     private val glowRect = RectF()
+
+    // cached layers
+    private var skyShader: Shader? = null
+    private var foreground: Bitmap? = null
+    private var cachedFor: Palette? = null
+    private val mistFilters = arrayOfNulls<PorterDuffColorFilter>(3)
 
     private val mistSpecs = arrayOf( // x%, y%, radius(%w), speed
         floatArrayOf(0.15f, 0.30f, 0.70f, 1.0f),
@@ -80,15 +95,14 @@ class ForestView(context: Context) : View(context) {
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         buildScene(w.toFloat(), h.toFloat())
+        cachedFor = null
     }
 
     private fun buildScene(w: Float, h: Float) {
-        // stars in the upper sky
         stars.clear()
         repeat(45) {
             stars += floatArrayOf(rnd.nextFloat() * w, rnd.nextFloat() * h * 0.45f, 0.8f + rnd.nextFloat() * 1.8f, rnd.nextFloat() * 6.28f)
         }
-        // fireflies
         flies.clear()
         repeat(26) {
             flies += Fly(rnd.nextFloat() * w, h * (0.35f + rnd.nextFloat() * 0.65f),
@@ -104,7 +118,6 @@ class ForestView(context: Context) : View(context) {
         )
         crowns.forEach { (cx, cy, r) -> backTrees.addCircle(cx * w, cy * h, r * w, Path.Direction.CW) }
         backTrees.addRect(-10f, h * 0.85f, w + 10f, h, Path.Direction.CW)
-        // trunks
         backTrees.addRect(w * 0.06f, h * 0.70f, w * 0.10f, h, Path.Direction.CW)
         backTrees.addRect(w * 0.88f, h * 0.66f, w * 0.92f, h, Path.Direction.CW)
 
@@ -127,7 +140,6 @@ class ForestView(context: Context) : View(context) {
             x += 9f + rnd.nextFloat() * 22f
         }
 
-        // mushrooms: (x%, size)
         mushroomCaps.clear(); mushroomSpots.clear()
         listOf(floatArrayOf(0.14f, 1.0f), floatArrayOf(0.22f, 0.6f), floatArrayOf(0.80f, 0.85f), floatArrayOf(0.87f, 0.5f)).forEach { (mx, s) ->
             val cx = mx * w
@@ -141,6 +153,25 @@ class ForestView(context: Context) : View(context) {
             mushroomSpots += floatArrayOf(cx + capW * 0.15f, cap.top + capW * 0.12f, capW * 0.045f)
             mushroomSpots += floatArrayOf(cx + capW * 0.02f, cap.top + capW * 0.28f, capW * 0.035f)
         }
+    }
+
+    /** Draws the still parts once (per size / palette) so frames stay cheap. */
+    private fun ensureCache(p: Palette) {
+        val w = width; val h = height
+        val fg = foreground
+        if (cachedFor === p && fg != null && fg.width == w && fg.height == h) return
+        skyShader = LinearGradient(0f, 0f, 0f, h.toFloat(), p.top, p.bottom, Shader.TileMode.CLAMP)
+        for (i in 0..2) mistFilters[i] = PorterDuffColorFilter(p.mist[i], PorterDuff.Mode.SRC_IN)
+        val bmp = if (fg != null && fg.width == w && fg.height == h) fg
+                  else Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888).also { fg?.recycle(); foreground = it }
+        bmp.eraseColor(0)
+        val c = Canvas(bmp)
+        groundPaint.color = alpha(p.ground, 200)   // back trees, slightly see-through so mist shows behind
+        c.drawPath(backTrees, groundPaint)
+        groundPaint.color = p.ground                // front ground + stems + caps
+        c.drawPath(frontGround, groundPaint)
+        for (cap in mushroomCaps) c.drawArc(cap, 180f, 180f, true, groundPaint)
+        cachedFor = p
     }
 
     private fun groundY(x: Float, w: Float, h: Float): Float {
@@ -165,44 +196,35 @@ class ForestView(context: Context) : View(context) {
         val h = height.toFloat()
         if (w == 0f || h == 0f) return
         val p = palette
+        ensureCache(p)
 
-        skyPaint.shader = LinearGradient(0f, 0f, 0f, h, p.top, p.bottom, Shader.TileMode.CLAMP)
+        skyPaint.shader = skyShader
         canvas.drawRect(0f, 0f, w, h, skyPaint)
 
-        // stars
         starPaint.color = p.glow
         for (s in stars) {
             starPaint.alpha = (60 + 140 * (sin(t * 1.5f + s[3]) + 1) / 2).toInt()
             canvas.drawCircle(s[0], s[1], s[2], starPaint)
         }
 
-        // mist
         for (i in mistSpecs.indices) {
             val m = mistSpecs[i]
             val cx = w * m[0] + sin(t * 0.25f * m[3] + i) * w * 0.10f
             val cy = h * m[1] + cos(t * 0.25f * m[3] + i * 2) * h * 0.04f
             val r = w * m[2]
-            mistPaint.shader = RadialGradient(cx, cy, r, intArrayOf(alpha(p.mist[i], 120), alpha(p.mist[i], 0)), null, Shader.TileMode.CLAMP)
-            canvas.drawCircle(cx, cy, r, mistPaint)
+            mistPaint.colorFilter = mistFilters[i]
+            glowRect.set(cx - r, cy - r, cx + r, cy + r)
+            canvas.drawBitmap(mistBitmap, null, glowRect, mistPaint)
         }
 
-        // back trees (slightly see-through so mist shows behind)
-        groundPaint.color = alpha(p.ground, 200)
-        canvas.drawPath(backTrees, groundPaint)
+        foreground?.let { canvas.drawBitmap(it, 0f, 0f, null) }
 
-        // front ground + stems
-        groundPaint.color = p.ground
-        canvas.drawPath(frontGround, groundPaint)
-        for (cap in mushroomCaps) canvas.drawArc(cap, 180f, 180f, true, groundPaint)
-
-        // glowing mushroom spots
         dotPaint.color = p.glow
         for (s in mushroomSpots) {
             dotPaint.alpha = (150 + 80 * sin(t + s[0])).toInt().coerceIn(0, 255)
             canvas.drawCircle(s[0], s[1], s[2], dotPaint)
         }
 
-        // fireflies
         for (f in flies) {
             val tw = (sin(t * 2f + f.phase) + 1) / 2
             glowPaint.alpha = (70 + 185 * tw).toInt()
