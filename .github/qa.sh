@@ -63,4 +63,6 @@ adb shell pidof app.irene.pastel > "$OUT/pid.txt"
 adb shell dumpsys gfxinfo app.irene.pastel > "$OUT/gfxinfo.txt"
 adb logcat -d -b crash > "$OUT/crash.txt"
 adb logcat -d | grep -iE "irene|pastel|AndroidRuntime|FATAL|ANR|Choreographer" > "$OUT/log-filtered.txt"
+echo "no crash" >> "$OUT/crash.txt"
+find "$OUT" -type f -empty -delete
 exit 0
