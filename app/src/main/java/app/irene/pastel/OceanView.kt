@@ -1,10 +1,13 @@
 package app.irene.pastel
 
 import android.content.Context
+import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.LinearGradient
 import android.graphics.Paint
 import android.graphics.Path
+import android.graphics.PorterDuff
+import android.graphics.PorterDuffColorFilter
 import android.graphics.RadialGradient
 import android.graphics.RectF
 import android.graphics.Shader
@@ -25,7 +28,7 @@ import kotlin.random.Random
 class OceanView(context: Context) : View(context) {
 
     var palette: Palette = Palettes.ocean[0]
-        set(value) { field = value; invalidate() }
+        set(value) { field = value; cachedFor = null; invalidate() }
 
     private val d = resources.displayMetrics.density
     private val rnd = Random(7)
@@ -38,7 +41,7 @@ class OceanView(context: Context) : View(context) {
     private val kelpPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND }
     private val fill = Paint(Paint.ANTI_ALIAS_FLAG)
     private val stroke = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND }
-    private val glowPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val glowPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
     private val path = Path()
     private val rect = RectF()
 
@@ -62,6 +65,19 @@ class OceanView(context: Context) : View(context) {
     private var whale = Swimmer(0f, 0f, 1f, 1, 1f, 0f)
     private var crab = Swimmer(0f, 0f, 1f, 1, 1f, 0f)
     private val sand = Path()
+
+    // cached so nothing heavy is rebuilt every frame (this is what keeps it smooth)
+    private var bgShader: Shader? = null
+    private var rayShader: Shader? = null
+    private var seabed: Bitmap? = null        // coral + sand + starfish + shells, drawn once
+    private var seabedTop = 0
+    private var cachedFor: Palette? = null
+    private val glowFilters = arrayOfNulls<PorterDuffColorFilter>(3)
+    private val glowBmp: Bitmap = Bitmap.createBitmap(96, 96, Bitmap.Config.ARGB_8888).also { b ->
+        val gp = Paint(Paint.ANTI_ALIAS_FLAG)
+        gp.shader = RadialGradient(48f, 48f, 48f, intArrayOf(0xFFFFFFFF.toInt(), 0x00FFFFFF), null, Shader.TileMode.CLAMP)
+        Canvas(b).drawCircle(48f, 48f, 48f, gp)
+    }
 
     private val frame = object : Runnable {
         override fun run() {
@@ -136,6 +152,30 @@ class OceanView(context: Context) : View(context) {
         sand.close()
         sand.addCircle(W * 0.18f, H * 0.935f, 16 * d, Path.Direction.CW)
         sand.addCircle(W * 0.78f, H * 0.93f, 20 * d, Path.Direction.CW)
+        cachedFor = null
+    }
+
+    /** Draws the still parts once (per size / palette) so frames stay cheap. */
+    private fun ensureCache(h: Float, p: Palette) {
+        val old = seabed
+        val top = (height * 0.72f).toInt()
+        if (cachedFor === p && old != null && old.width == width && seabedTop == top) return
+        bgShader = LinearGradient(0f, 0f, 0f, h, p.top, p.bottom, Shader.TileMode.CLAMP)
+        rayShader = LinearGradient(0f, 0f, 0f, h * 0.75f, alpha(p.glow, 46), alpha(p.glow, 0), Shader.TileMode.CLAMP)
+        for (i in 0..2) glowFilters[i] = PorterDuffColorFilter(p.mist[i], PorterDuff.Mode.SRC_IN)
+        seabedTop = top
+        val bh = height - top
+        val bmp = if (old != null && old.width == width && old.height == bh) old
+                  else Bitmap.createBitmap(width, bh, Bitmap.Config.ARGB_8888).also { old?.recycle(); seabed = it }
+        bmp.eraseColor(0)
+        val c = Canvas(bmp)
+        c.translate(0f, -top.toFloat())
+        for (co in corals) drawCoral(c, co[0], sandY(co[0]), co[1], p.mist[co[2].toInt()])
+        fill.shader = null; fill.color = p.ground
+        c.drawPath(sand, fill)
+        for (s in stars) drawStarfish(c, s[0], sandY(s[0]) + 4 * d, s[1], s[2])
+        for (s in shells) drawShell(c, s[0], sandY(s[0]) + 3 * d, s[1])
+        cachedFor = p
     }
 
     private fun sandY(x: Float): Float {
@@ -200,7 +240,8 @@ class OceanView(context: Context) : View(context) {
         if (w == 0f || h == 0f) return
         val p = palette
 
-        bgPaint.shader = LinearGradient(0f, 0f, 0f, h, p.top, p.bottom, Shader.TileMode.CLAMP)
+        ensureCache(h, p)
+        bgPaint.shader = bgShader
         c.drawRect(0f, 0f, w, h, bgPaint)
 
         drawRays(c, w, h, p)
@@ -208,12 +249,8 @@ class OceanView(context: Context) : View(context) {
         drawCurrents(c, w, h, p)
         drawPlankton(c, p)
         drawKelp(c, h, p)
-        for (co in corals) drawCoral(c, co[0], sandY(co[0]), co[1], p.mist[co[2].toInt()])
         for (a in anemones) drawAnemone(c, a[0], sandY(a[0]), a[1], p.mist[a[2].toInt()])
-        fill.shader = null; fill.color = p.ground
-        c.drawPath(sand, fill)
-        for (s in stars) drawStarfish(c, s[0], sandY(s[0]) + 4 * d, s[1], s[2])
-        for (s in shells) drawShell(c, s[0], sandY(s[0]) + 3 * d, s[1])
+        seabed?.let { c.drawBitmap(it, 0f, seabedTop.toFloat(), null) } // coral, sand, starfish, shells (pre-drawn)
         drawCrab(c)
         for (s in seahorses) drawSeahorse(c, s, p)
         for (j in jellies) drawJelly(c, j, p)
@@ -226,7 +263,7 @@ class OceanView(context: Context) : View(context) {
     // ───────── environment ─────────
 
     private fun drawRays(c: Canvas, w: Float, h: Float, p: Palette) {
-        rayPaint.shader = LinearGradient(0f, 0f, 0f, h * 0.75f, alpha(p.glow, 46), alpha(p.glow, 0), Shader.TileMode.CLAMP)
+        rayPaint.shader = rayShader
         for (i in 0 until 5) {
             val top = w * (0.1f + i * 0.2f) + sin(t * 0.3f + i) * 20 * d
             val spread = (30 + i % 3 * 22) * d
@@ -458,8 +495,10 @@ class OceanView(context: Context) : View(context) {
         val col = p.mist[j.color]
         val pulse = 1f + 0.12f * sin(t * 1.4f + j.phase + 3.14f)
         val s = j.size
-        glowPaint.shader = RadialGradient(j.x, j.y, s * 2.2f, intArrayOf(alpha(col, 70), alpha(col, 0)), null, Shader.TileMode.CLAMP)
-        c.drawCircle(j.x, j.y, s * 2.2f, glowPaint)
+        glowPaint.colorFilter = glowFilters[j.color]
+        glowPaint.alpha = 70
+        rect.set(j.x - s * 2.2f, j.y - s * 2.2f, j.x + s * 2.2f, j.y + s * 2.2f)
+        c.drawBitmap(glowBmp, null, rect, glowPaint)
         stroke.color = alpha(col, 150); stroke.strokeWidth = 2.2f * d
         for (k in 0 until 5) {
             val tx = j.x - s * 0.6f + k * s * 0.3f
