@@ -165,6 +165,7 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        HealthSync.maybeSync(this) // hourly, only if health sync is on
         if (underwater) ocean.start() else bg.start()
         updateClock()
         // shake 3x to toggle underwater mode
@@ -718,6 +719,7 @@ class MainActivity : Activity() {
             menu.add(0, 3, 3, "set as default home app")
             menu.add(0, 4, 4, if (underwater) "enchanted underwater: on ◦ (shake 3x)" else "enchanted underwater (or shake 3x)")
             menu.add(0, 5, 5, if (useWallpaper) "themed phone wallpaper: on ✓" else "themed phone wallpaper: off")
+            menu.add(0, 6, 6, if (HealthSync.key(this@MainActivity).isBlank()) "health sync ♡" else "health sync ♡ (sync now)")
             setOnMenuItemClickListener {
                 when (it.itemId) {
                     0 -> nextPalette()
@@ -731,10 +733,45 @@ class MainActivity : Activity() {
                         prefs.edit().putBoolean("wallpaper", !useWallpaper).remove("wp_key").apply()
                         if (useWallpaper) toast("your wallpaper updates next time you leave home \u2727")
                     }
+                    6 -> healthSyncMenu()
                 }
                 true
             }
         }.show()
+    }
+
+    // ── health sync: Health Connect → Irene OS ──
+    private fun healthSyncMenu() {
+        when (HealthSync.availability(this)) {
+            1 -> { toast("install / update Health Connect first ♡"); HealthSync.openStore(this); return }
+            2 -> { toast("Health Connect isn't available on this phone"); return }
+        }
+        val hasKey = HealthSync.key(this).isNotBlank()
+        val items = if (hasKey) arrayOf("sync now", "allow / change health permissions", "paste a new key", "turn off health sync")
+                    else arrayOf("paste my key from Irene OS")
+        AlertDialog.Builder(this)
+            .setTitle("health sync ♡")
+            .setItems(items) { _, which ->
+                when (if (hasKey) which else 2) {
+                    0 -> { toast("syncing…"); HealthSync.sync(this) { _, msg -> runOnUiThread { toast(msg) } } }
+                    1 -> HealthSync.requestPermissions(this)
+                    2 -> textDialog("paste your key (Irene OS → Settings → Health sync)", "") { v ->
+                        if (v.isBlank()) return@textDialog
+                        HealthSync.setKey(this, v)
+                        HealthSync.requestPermissions(this)
+                    }
+                    3 -> { HealthSync.setKey(this, ""); toast("health sync off") }
+                }
+            }
+            .show()
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == HealthSync.REQUEST_CODE) {
+            toast("syncing your health data…")
+            HealthSync.sync(this) { _, msg -> runOnUiThread { toast(msg) } }
+        }
     }
 
     private fun editNote() = textDialog("note ✧", prefs.getString("note", "").orEmpty(), multiline = true) { v ->

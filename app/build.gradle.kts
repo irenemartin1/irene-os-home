@@ -26,4 +26,9 @@ android {
     kotlinOptions { jvmTarget = "17" }
 }
 
-// No extra libraries on purpose: plain Android framework only, so it builds clean.
+// Plain Android framework for the launcher itself; Health Connect (+ coroutines) only for health sync.
+dependencies {
+    implementation("androidx.health.connect:connect-client:1.1.0-alpha07")
+    implementation("androidx.activity:activity:1.8.2")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
+}
