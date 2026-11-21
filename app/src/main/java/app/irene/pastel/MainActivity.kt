@@ -58,7 +58,8 @@ data class AppEntry(
     val label: String,
     val component: ComponentName,
     val icon: Drawable,
-    val mono: Drawable? // Android 13 themed-icon layer, if the app has one
+    val mono: Drawable?, // Android 13 themed-icon layer, if the app has one
+    val color: Int = 0   // the app's main color (used for its creature)
 )
 
 class MainActivity : Activity() {
@@ -83,7 +84,6 @@ class MainActivity : Activity() {
     private lateinit var dock: LinearLayout
     private lateinit var search: EditText
     private lateinit var grid: GridView
-    private lateinit var gestures: GestureDetector
     private val adapter = AppAdapter()
 
     private var allApps: List<AppEntry> = emptyList()
@@ -126,7 +126,6 @@ class MainActivity : Activity() {
                 WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS
         window.insetsController?.setSystemBarsAppearance(0, light)
 
-        gestures = GestureDetector(this, Swipes())
         ocean.alpha = if (underwater) 1f else 0f
         // only the active world is drawn (the hidden one costs nothing)
         ocean.visibility = if (underwater) View.VISIBLE else View.INVISIBLE
@@ -191,9 +190,43 @@ class MainActivity : Activity() {
         if (drawerOpen) closeDrawer() // on the home screen, back does nothing
     }
 
+    // ── swipe handling ──
+    // Our own swipe tracking (works even when the phone is busy). Touches that start in Android's
+    // gesture strip at the very bottom are left alone, so the system Home gesture never fights us.
+    private var downX = 0f
+    private var downY = 0f
+    private var trackSwipe = false
+    private var swipeDone = false
+
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
-        gestures.onTouchEvent(ev)
-        if (underwater && !drawerOpen && ev.actionMasked == MotionEvent.ACTION_DOWN) ocean.puff(ev.x, ev.y)
+        when (ev.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                downX = ev.rawX; downY = ev.rawY; swipeDone = false
+                trackSwipe = ev.rawY < resources.displayMetrics.heightPixels - dp(48)
+                if (underwater && !drawerOpen) ocean.puff(ev.x, ev.y)
+            }
+            MotionEvent.ACTION_MOVE -> if (trackSwipe && !swipeDone) {
+                val dy = ev.rawY - downY
+                val dx = ev.rawX - downX
+                if (abs(dy) > dp(60) && abs(dy) > abs(dx) * 1.4f) {
+                    if (!drawerOpen) {
+                        swipeDone = true
+                        if (dy < 0) openDrawer() else expandNotifications()
+                    } else if (dy > 0 && !grid.canScrollVertically(-1)) {
+                        swipeDone = true
+                        closeDrawer()
+                    }
+                    if (swipeDone) { // tell the views underneath the touch is over
+                        val cancel = MotionEvent.obtain(ev)
+                        cancel.action = MotionEvent.ACTION_CANCEL
+                        super.dispatchTouchEvent(cancel)
+                        cancel.recycle()
+                        return true
+                    }
+                }
+            }
+        }
+        if (swipeDone) return true
         return super.dispatchTouchEvent(ev)
     }
 
@@ -378,7 +411,8 @@ class MainActivity : Activity() {
                     AppEntry(
                         ri.loadLabel(pm).toString(),
                         ComponentName(ri.activityInfo.packageName, ri.activityInfo.name),
-                        icon, mono
+                        icon, mono,
+                        CreatureIcon.bodyColorFor(icon, ri.activityInfo.packageName.hashCode())
                     )
                 }
                 .sortedBy { it.label.lowercase() }
@@ -497,22 +531,6 @@ class MainActivity : Activity() {
         } catch (_: Throwable) { }
     }
 
-    inner class Swipes : GestureDetector.SimpleOnGestureListener() {
-        override fun onDown(e: MotionEvent) = true
-        override fun onFling(e1: MotionEvent?, e2: MotionEvent, vx: Float, vy: Float): Boolean {
-            val start = e1 ?: return false
-            val dy = e2.y - start.y
-            val dx = e2.x - start.x
-            if (abs(dy) < abs(dx) || abs(dy) < dp(80)) return false
-            if (!drawerOpen) {
-                if (dy < 0) openDrawer() else expandNotifications()
-            } else if (dy > 0 && !grid.canScrollVertically(-1)) {
-                closeDrawer()
-            }
-            return true
-        }
-    }
-
     // ───────────────────────── menus & dialogs ─────────────────────────
 
     private fun appMenu(anchor: View, app: AppEntry) {
@@ -552,7 +570,7 @@ class MainActivity : Activity() {
     private fun settingsMenu(anchor: View) {
         PopupMenu(this, anchor).apply {
             menu.add(0, 0, 0, "next palette")
-            menu.add(0, 1, 1, if (themedIcons) "themed icons: on ✓" else "themed icons: off")
+            menu.add(0, 1, 1, if (themedIcons) "creature icons: on ✓" else "creature icons: off")
             menu.add(0, 2, 2, "change my name")
             menu.add(0, 3, 3, "set as default home app")
             menu.add(0, 4, 4, if (underwater) "underwater mode: on ◦" else "underwater mode (or shake 3x)")
@@ -647,8 +665,9 @@ class MainActivity : Activity() {
         // whimsical orb behind the icon + a little ocean/forest charm on top (same charm per app, every time)
         val seed = app?.component?.packageName?.hashCode() ?: 0
         val density = resources.displayMetrics.density
-        bubble.background = BubbleDrawable(palette, underwater, seed, density, charmLayer = false)
-        bubble.foreground = if (app != null) BubbleDrawable(palette, underwater, seed, density, charmLayer = true) else null
+        val creatures = themedIcons && app != null
+        bubble.background = if (creatures) null else BubbleDrawable(palette, underwater, seed, density, charmLayer = false)
+        bubble.foreground = if (app != null && !creatures) BubbleDrawable(palette, underwater, seed, density, charmLayer = true) else null
         val img = bubble.findViewWithTag<ImageView>("img")
         val plus = bubble.findViewWithTag<TextView>("plus")
         if (app == null) {
@@ -659,9 +678,11 @@ class MainActivity : Activity() {
         }
         plus.visibility = View.GONE
         val mono = app.mono
-        if (themedIcons && mono != null) {
-            img.setPadding(dp(2), dp(2), dp(2), dp(2))
-            img.setImageDrawable(fresh(mono).apply { setTint(palette.ink) })
+        if (creatures) {
+            // the app itself, turned into a little forest / sea creature in the app's own colors
+            val art = if (mono != null) fresh(mono) else fresh(app.icon)
+            img.setPadding(0, 0, 0, 0)
+            img.setImageDrawable(CreatureIcon(art, mono != null, app.color, underwater, seed, density, palette.glow))
         } else {
             img.setPadding(dp(9), dp(9), dp(9), dp(9))
             img.setImageDrawable(fresh(app.icon))
