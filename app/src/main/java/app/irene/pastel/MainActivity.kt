@@ -26,6 +26,7 @@ import android.hardware.SensorManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.SystemClock
 import android.provider.AlarmClock
 import android.provider.MediaStore
 import android.provider.Settings
@@ -59,6 +60,7 @@ import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 import kotlin.math.abs
+import kotlin.math.hypot
 import kotlin.math.max
 
 data class AppEntry(
@@ -228,8 +230,29 @@ class MainActivity : Activity() {
             tracker?.recycle()
             tracker = VelocityTracker.obtain()
             if (underwater && !drawerOpen) ocean.puff(ev.x, ev.y)
+            // tapping anywhere outside the note puts the keyboard away
+            if (noteCard.hasFocus()) {
+                val r = android.graphics.Rect()
+                noteCard.getGlobalVisibleRect(r)
+                if (!r.contains(ev.rawX.toInt(), ev.rawY.toInt())) { noteCard.clearFocus(); hideKeyboard(noteCard) }
+            }
         }
         tracker?.addMovement(ev)
+
+        // dragging an app around the home screen
+        if (dragApp != null) {
+            if (dragNeedsCancel) { cancelTouchFor(ev); dragNeedsCancel = false }
+            when (ev.actionMasked) {
+                MotionEvent.ACTION_MOVE -> {
+                    if (hypot(ev.rawX - downX, ev.rawY - downY) > dp(10)) dragMoved = true
+                    moveDragView(ev.rawX, ev.rawY)
+                    checkEdgeFlip(ev.rawX)
+                }
+                MotionEvent.ACTION_UP -> finishHomeDrag(ev.rawX, ev.rawY, false)
+                MotionEvent.ACTION_CANCEL -> finishHomeDrag(ev.rawX, ev.rawY, true)
+            }
+            return true
+        }
         if (!trackSwipe) return super.dispatchTouchEvent(ev)
 
         val dy = ev.rawY - downY
@@ -288,6 +311,7 @@ class MainActivity : Activity() {
 
     private fun buildUi(): View {
         val root = FrameLayout(this)
+        rootFrame = root
         bg = ForestView(this)
         root.addView(bg, match())
         ocean = OceanView(this)
@@ -297,8 +321,10 @@ class MainActivity : Activity() {
         homeLayer = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
+            // long-press any empty spot on the home screen = settings
+            setOnLongClickListener { settingsMenu(homeGrid); true }
         }
-        homeLayer.addView(View(this), LinearLayout.LayoutParams(1, dp(28)))
+        homeLayer.addView(View(this), LinearLayout.LayoutParams(1, dp(14)))
 
         // Your fairy logo: drop it in res/drawable as fairy_logo.png and it shows up here
         logo = ImageView(this).apply {
@@ -314,7 +340,7 @@ class MainActivity : Activity() {
             letterSpacing = 0.35f
             isAllCaps = true
         }
-        homeLayer.addView(brandText)
+        // (plain home screen: no title, clock, date or greeting)
 
         clockText = title(72f).apply {
             letterSpacing = -0.03f
@@ -326,19 +352,27 @@ class MainActivity : Activity() {
             setOnClickListener { nextPalette() }
             setOnLongClickListener { settingsMenu(it); true }
         }
-        noteCard = text(15f).apply {
+        // your one note: tap it and type right on the home screen, it saves as you go
+        noteCard = EditText(this).apply {
+            textSize = 15f
             setPadding(dp(20), dp(14), dp(20), dp(14))
-            maxLines = 4
-            ellipsize = TextUtils.TruncateAt.END
-            maxWidth = dp(300)
-            setOnClickListener { editNote() }
+            minLines = 1
+            maxLines = 6
+            gravity = Gravity.TOP or Gravity.START
+            hint = "tap to write your note \u2727"
+            imeOptions = EditorInfo.IME_FLAG_NO_EXTRACT_UI
+            setText(prefs.getString("note", ""))
+            addTextChangedListener(object : TextWatcher {
+                override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
+                override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
+                override fun afterTextChanged(s: Editable?) {
+                    prefs.edit().putString("note", s?.toString().orEmpty()).apply()
+                }
+            })
         }
-        homeLayer.addView(clockText)
-        homeLayer.addView(dateText)
-        homeLayer.addView(greetText)
         homeLayer.addView(noteCard, LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT
-        ).apply { topMargin = dp(12) })
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+        ).apply { setMargins(dp(20), dp(6), dp(20), 0) })
 
         // HOME SCREEN PAGES: your apps in a grid; swipe left / right between pages
         homeGrid = LinearLayout(this).apply {
@@ -375,6 +409,7 @@ class MainActivity : Activity() {
         drawerLayer = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             visibility = View.GONE
+            isClickable = true // touches on the drawer never fall through to the home screen
         }
         search = EditText(this).apply {
             isSingleLine = true
@@ -459,9 +494,7 @@ class MainActivity : Activity() {
     }
 
     private fun refreshNote() {
-        val note = prefs.getString("note", "").orEmpty()
-        noteCard.text = note.ifBlank { "tap to leave a note for future you ✧" }
-        noteCard.alpha = if (note.isBlank()) 0.7f else 1f
+        noteCard.setHintTextColor(palette.soft)
     }
 
     // ───────────────────────── apps ─────────────────────────
@@ -575,11 +608,13 @@ class MainActivity : Activity() {
     private fun openDrawer(pick: Int = -1) {
         beginDrawerDrag()
         pickingSlot = pick
-        search.hint = if (pick >= 0) "pick an app for slot ${pick + 1} ✧" else "search the forest ⋆˚✿"
+        search.hint = if (pick >= 0) "pick an app for slot ${pick + 1} ✧" else searchHint()
         settleDrawer(true)
     }
 
     private fun closeDrawer() = settleDrawer(false)
+
+    private fun searchHint() = if (underwater) "search enchanted underwater ◦" else "search the enchanted forest ✿"
 
     // ── drawer motion (shared by taps, swipes and the Home button) ──
     private var drawerProgress = 0f       // 0 = closed, 1 = fully open
@@ -596,7 +631,7 @@ class MainActivity : Activity() {
         if (!drawerOpen && drawerProgress == 0f) {
             pickingSlot = -1
             search.setText("")
-            search.hint = "search the forest ⋆˚✿"
+            search.hint = searchHint()
             grid.setSelection(0)
         }
     }
@@ -681,7 +716,7 @@ class MainActivity : Activity() {
             menu.add(0, 1, 1, if (themedIcons) "creature icons: on ✓" else "creature icons: off")
             menu.add(0, 2, 2, "change my name")
             menu.add(0, 3, 3, "set as default home app")
-            menu.add(0, 4, 4, if (underwater) "underwater mode: on ◦" else "underwater mode (or shake 3x)")
+            menu.add(0, 4, 4, if (underwater) "enchanted underwater: on ◦ (shake 3x)" else "enchanted underwater (or shake 3x)")
             menu.add(0, 5, 5, if (useWallpaper) "themed phone wallpaper: on ✓" else "themed phone wallpaper: off")
             setOnMenuItemClickListener {
                 when (it.itemId) {
@@ -746,13 +781,13 @@ class MainActivity : Activity() {
             ocean.animate().alpha(1f).setDuration(700)
                 .withEndAction { if (underwater) { bg.stop(); bg.visibility = View.INVISIBLE } }.start()
             ocean.post { ocean.burst() }
-            toast("◦ underwater mode ◦")
+            toast("◦ enchanted underwater ◦")
         } else {
             bg.visibility = View.VISIBLE
             bg.start()
             ocean.animate().alpha(0f).setDuration(700)
                 .withEndAction { if (!underwater) { ocean.stop(); ocean.visibility = View.INVISIBLE } }.start()
-            toast("✦ back to the forest ✦")
+            toast("✦ enchanted forest ✦")
         }
         applyPalette()
     }
@@ -840,54 +875,81 @@ class MainActivity : Activity() {
     }
 
     // ───────────────────────── home screen pages ─────────────────────────
-    // Saved as an ordered list of apps; split into pages of 4 columns x however many rows fit.
+    // Saved as a list of slots (empty slots allowed), split into pages of 4 columns x however many
+    // rows fit. Long-press + drag to move an app anywhere; hold it at the screen edge to change page;
+    // drop it on the dock to swap it in. Long-press + let go (no drag) = remove / app info.
+
+    private lateinit var rootFrame: FrameLayout
+    private var dragApp: AppEntry? = null
+    private var dragFrom = -1
+    private var dragCell: View? = null
+    private var dragView: ImageView? = null
+    private var dragMoved = false
+    private var dragNeedsCancel = false
+    private var edgeSince = 0L
 
     private fun homeApps(): MutableList<String> =
-        prefs.getString("home_apps", "").orEmpty().split("|").filter { it.isNotBlank() }.toMutableList()
+        prefs.getString("home_apps", "").orEmpty().split("|").toMutableList().also { trimEnd(it) }
 
-    private fun saveHomeApps(list: List<String>) = prefs.edit().putString("home_apps", list.joinToString("|")).apply()
+    private fun trimEnd(list: MutableList<String>) {
+        while (list.isNotEmpty() && list.last().isBlank()) list.removeAt(list.size - 1)
+    }
 
-    private fun pageSize(): Int = (homeGrid.height / dp(92)).coerceIn(1, 5) * 4
+    private fun saveHomeApps(list: MutableList<String>) {
+        trimEnd(list)
+        prefs.edit().putString("home_apps", list.joinToString("|")).apply()
+    }
 
-    private fun homeEntries(): List<AppEntry> =
-        homeApps().mapNotNull { key -> allApps.firstOrNull { it.component.flattenToString() == key } }
+    private fun pageSize(): Int = (homeGrid.height / dp(92)).coerceIn(1, 7) * 4
+
+    /** One entry per slot: the app, or null for an empty spot. */
+    private fun homeSlots(): List<AppEntry?> =
+        homeApps().map { key -> if (key.isBlank()) null else allApps.firstOrNull { it.component.flattenToString() == key } }
+
+    private fun pageCount(): Int {
+        val size = pageSize()
+        val used = max(1, (homeSlots().size + size - 1) / size)
+        return if (dragApp != null) max(used, homePage + 1) else used
+    }
 
     private fun refreshHome() {
         if (!::homeGrid.isInitialized || homeGrid.height == 0) return
-        val apps = homeEntries()
+        val slots = homeSlots()
         val size = pageSize()
-        val pages = max(1, (apps.size + size - 1) / size)
+        val pages = pageCount()
         homePage = homePage.coerceIn(0, pages - 1)
         homeGrid.removeAllViews()
-        apps.drop(homePage * size).take(size).chunked(4).forEach { rowApps ->
+        for (r in 0 until size / 4) {
             val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-            for (i in 0 until 4) {
-                val app = rowApps.getOrNull(i)
-                val cell: View = if (app != null) emptyCell().also { c ->
-                    bindCell(c, app)
-                    c.setOnClickListener { launch(app) }
-                    c.setOnLongClickListener { homeMenu(it, app); true }
+            for (c in 0 until 4) {
+                val slot = homePage * size + r * 4 + c
+                val app = slots.getOrNull(slot)
+                val cell: View = if (app != null) emptyCell().also { cv ->
+                    bindCell(cv, app)
+                    cv.setOnClickListener { launch(app) }
+                    cv.setOnLongClickListener { startHomeDrag(cv, app, slot); true }
+                    if (slot == dragFrom) cv.alpha = 0.25f
                 } else View(this)
                 row.addView(cell, LinearLayout.LayoutParams(0, dp(92), 1f))
             }
             homeGrid.addView(row, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         }
-        if (apps.isEmpty() && allApps.isNotEmpty()) {
+        if (slots.all { it == null } && allApps.isNotEmpty() && dragApp == null) {
+            homeGrid.removeAllViews()
             homeGrid.addView(text(13f).apply {
-                text = "long-press any app in the drawer → \"add to home screen\" ✧"
+                text = "swipe up, long-press any app \u2192 \"add to home screen\" \u2727"
                 setTextColor(palette.soft)
                 setPadding(dp(24), dp(40), dp(24), 0)
             })
         }
-        pageDots.text = if (pages > 1) (0 until pages).joinToString("  ") { if (it == homePage) "●" else "○" } else ""
+        pageDots.text = if (pages > 1) (0 until pages).joinToString("  ") { if (it == homePage) "\u25cf" else "\u25cb" } else ""
         pageDots.setTextColor(palette.soft)
     }
 
     private fun turnPage(delta: Int) {
-        val size = pageSize()
-        val pages = max(1, (homeEntries().size + size - 1) / size)
         val next = homePage + delta
-        if (next < 0 || next >= pages) return
+        val limit = if (dragApp != null) pageCount() + 1 else pageCount()
+        if (next < 0 || next >= limit) return
         homePage = next
         refreshHome()
         homeGrid.alpha = 0f
@@ -898,27 +960,120 @@ class MainActivity : Activity() {
     private fun addToHome(app: AppEntry) {
         val list = homeApps()
         val key = app.component.flattenToString()
-        if (key in list) { toast("already on your home screen ✧"); return }
-        list += key
+        if (key in list) { toast("already on your home screen \u2727"); return }
+        val free = list.indexOfFirst { it.isBlank() }
+        val slot = if (free >= 0) free else list.size
+        if (free >= 0) list[free] = key else list += key
         saveHomeApps(list)
         if (drawerOpen) closeDrawer()
-        homePage = (list.size - 1) / pageSize()
+        homePage = slot / pageSize()
         refreshHome()
-        toast("added ${app.label} to home ✧")
+        toast("added ${app.label} to home \u2727")
     }
 
-    private fun homeMenu(anchor: View, app: AppEntry) {
+    private fun startHomeDrag(cell: View, app: AppEntry, slot: Int) {
+        dragApp = app; dragFrom = slot; dragCell = cell
+        dragMoved = false; dragNeedsCancel = true; edgeSince = 0L
+        cell.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+        cell.alpha = 0.25f
+        val mono = app.mono
+        val seed = app.component.packageName.hashCode()
+        val img = ImageView(this).apply {
+            setImageDrawable(
+                if (themedIcons) CreatureIcon(if (mono != null) fresh(mono) else fresh(app.icon), mono != null, app.color,
+                    underwater, seed, resources.displayMetrics.density, palette.glow)
+                else fresh(app.icon)
+            )
+            scaleX = 1.2f; scaleY = 1.2f
+            elevation = dp(10).toFloat()
+        }
+        rootFrame.addView(img, FrameLayout.LayoutParams(dp(66), dp(66)))
+        dragView = img
+        moveDragView(downX, downY)
+    }
+
+    private fun moveDragView(x: Float, y: Float) {
+        dragView?.let { v ->
+            v.x = x - dp(33)
+            v.y = y - dp(33) - dp(24) // a little above your finger so you can see it
+        }
+    }
+
+    /** Hold the app at the left/right edge to carry it to another page. */
+    private fun checkEdgeFlip(x: Float) {
+        val w = window.decorView.width
+        if (w == 0 || (x > dp(28) && x < w - dp(28))) { edgeSince = 0L; return }
+        val now = SystemClock.uptimeMillis()
+        if (edgeSince == 0L) edgeSince = now
+        else if (now - edgeSince > 650) {
+            edgeSince = now
+            turnPage(if (x < w / 2) -1 else 1)
+        }
+    }
+
+    private fun slotAt(x: Float, y: Float): Int? {
+        val g = IntArray(2)
+        homeGrid.getLocationOnScreen(g)
+        if (x < g[0] || x > g[0] + homeGrid.width || y < g[1] || y > g[1] + homeGrid.height) return null
+        val size = pageSize()
+        val col = ((x - g[0]) / (homeGrid.width / 4f)).toInt().coerceIn(0, 3)
+        val row = ((y - g[1]) / dp(92)).toInt()
+        if (row >= size / 4) return null
+        return homePage * size + row * 4 + col
+    }
+
+    private fun finishHomeDrag(x: Float, y: Float, cancelled: Boolean) {
+        val app = dragApp ?: return
+        val from = dragFrom
+        val anchor = dragCell
+        dragView?.let { rootFrame.removeView(it) }
+        dragView = null; dragApp = null; dragFrom = -1; dragCell = null
+        if (cancelled) { refreshHome(); return }
+        if (!dragMoved) { // long-press without dragging -> options
+            refreshHome()
+            homeMenu(anchor ?: homeGrid, app, from)
+            return
+        }
+        val list = homeApps()
+        // dropped on the dock: swap with that dock slot
+        val d = IntArray(2)
+        dock.getLocationOnScreen(d)
+        if (y >= d[1] - dp(8) && y <= d[1] + dock.height + dp(8)) {
+            val slot = ((x - d[0]) / (dock.width / DOCK_SLOTS.toFloat())).toInt().coerceIn(0, DOCK_SLOTS - 1)
+            val previous = prefs.getString("fav$slot", null)
+            while (list.size <= from) list += ""
+            list[from] = previous ?: ""
+            saveHomeApps(list)
+            pin(app, slot)
+            refreshHome()
+            return
+        }
+        // dropped on the grid: move there (swaps if another app is in that spot)
+        val target = slotAt(x, y)
+        if (target != null && target != from) {
+            while (list.size <= max(target, from)) list += ""
+            val other = list[target]
+            list[target] = list[from]
+            list[from] = other
+            saveHomeApps(list)
+        }
+        refreshHome()
+    }
+
+    private fun homeMenu(anchor: View, app: AppEntry, slot: Int) {
         PopupMenu(this, anchor).apply {
             menu.add(0, 0, 0, "remove from home screen")
-            menu.add(0, 1, 1, "move to the front")
-            menu.add(0, 2, 2, "app info")
+            menu.add(0, 1, 1, "app info")
+            menu.add(0, 2, 2, "uninstall")
             setOnMenuItemClickListener {
-                val key = app.component.flattenToString()
-                val list = homeApps()
                 when (it.itemId) {
-                    0 -> { list.remove(key); saveHomeApps(list); refreshHome() }
-                    1 -> { list.remove(key); list.add(0, key); saveHomeApps(list); homePage = 0; refreshHome() }
-                    2 -> appInfo(app)
+                    0 -> {
+                        val list = homeApps()
+                        if (slot in list.indices) { list[slot] = ""; saveHomeApps(list) }
+                        refreshHome()
+                    }
+                    1 -> appInfo(app)
+                    2 -> uninstall(app)
                 }
                 true
             }
@@ -939,6 +1094,7 @@ class MainActivity : Activity() {
             .map { it.component.flattenToString() }
             .filter { it !in dockKeys }
             .take(8)
+            .toMutableList()
         saveHomeApps(picks)
         prefs.edit().putBoolean("home_seeded", true).apply()
     }
@@ -1005,9 +1161,9 @@ class MainActivity : Activity() {
 
     private fun toast(s: String) = Toast.makeText(this, s, Toast.LENGTH_SHORT).show()
 
-    private fun hideKeyboard() {
+    private fun hideKeyboard(from: View = search) {
         (getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager)
-            .hideSoftInputFromWindow(search.windowToken, 0)
+            .hideSoftInputFromWindow(from.windowToken, 0)
     }
 
     private fun register(r: BroadcastReceiver, f: IntentFilter) {
