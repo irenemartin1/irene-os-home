@@ -75,6 +75,24 @@ adb shell input keyevent KEYCODE_BACK
 sleep 2
 adb shell dumpsys wallpaper | grep -iE "mWidth|mHeight|wallpaper" | head -8 > "$OUT/wallpaper.txt"
 
+# 7c. organize: long-press the first home app and drag it to row 3, column 4
+adb shell input keyevent KEYCODE_HOME
+sleep 3; shot 15-before-drag
+D=$(adb shell wm density | grep -o "[0-9]*" | tail -1)
+X1=$(( (12 + 24) * D / 160 + W / 8 - 40 ))
+Y1=$(( 180 * D / 160 ))
+X2=$(( W - W / 8 ))
+Y2=$(( Y1 + 2 * 92 * D / 160 ))
+adb shell input draganddrop $X1 $Y1 $X2 $Y2 2500
+sleep 3; shot 16-after-drag
+# type into the note
+adb shell input tap $CX $(( 60 * D / 160 ))
+sleep 1
+adb shell input text "buy%sfairy%slights"
+sleep 1
+adb shell input keyevent KEYCODE_BACK
+sleep 2; shot 17-note
+
 # 8. let it run a while, then check it is still alive + smooth
 sleep 20
 adb shell pidof app.irene.pastel > "$OUT/pid.txt"
