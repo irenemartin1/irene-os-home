@@ -128,6 +128,9 @@ class MainActivity : Activity() {
 
         gestures = GestureDetector(this, Swipes())
         ocean.alpha = if (underwater) 1f else 0f
+        // only the active world is drawn (the hidden one costs nothing)
+        ocean.visibility = if (underwater) View.VISIBLE else View.INVISIBLE
+        bg.visibility = if (underwater) View.INVISIBLE else View.VISIBLE
         bg.palette = Palettes.all[prefs.getInt("palette", 0).coerceIn(0, Palettes.all.lastIndex)]
         applyPalette()
         updateClock()
@@ -603,15 +606,17 @@ class MainActivity : Activity() {
         window.decorView.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
         if (underwater) {
             ocean.palette = palette
+            ocean.visibility = View.VISIBLE
             ocean.start()
             ocean.animate().alpha(1f).setDuration(700)
-                .withEndAction { if (underwater) bg.stop() }.start()
+                .withEndAction { if (underwater) { bg.stop(); bg.visibility = View.INVISIBLE } }.start()
             ocean.post { ocean.burst() }
             toast("◦ underwater mode ◦")
         } else {
+            bg.visibility = View.VISIBLE
             bg.start()
             ocean.animate().alpha(0f).setDuration(700)
-                .withEndAction { if (!underwater) ocean.stop() }.start()
+                .withEndAction { if (!underwater) { ocean.stop(); ocean.visibility = View.INVISIBLE } }.start()
             toast("✦ back to the forest ✦")
         }
         applyPalette()
