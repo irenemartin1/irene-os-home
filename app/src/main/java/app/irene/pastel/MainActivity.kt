@@ -75,6 +75,9 @@ class MainActivity : Activity() {
         const val DOCK_SLOTS = 4
         const val GRID_COLUMNS = 4
         const val DEFAULT_NAME = "irene"
+        // apps stay in memory, so if Android restarts the launcher (e.g. after a wallpaper change)
+        // it comes back instantly with your dock + home screen already filled in
+        private var appCache: List<AppEntry> = emptyList()
     }
 
     private lateinit var prefs: SharedPreferences
@@ -141,6 +144,7 @@ class MainActivity : Activity() {
         ocean.visibility = if (underwater) View.VISIBLE else View.INVISIBLE
         bg.visibility = if (underwater) View.INVISIBLE else View.VISIBLE
         bg.palette = Palettes.all[prefs.getInt("palette", 0).coerceIn(0, Palettes.all.lastIndex)]
+        if (appCache.isNotEmpty()) { allApps = appCache; shown = appCache }
         applyPalette()
         updateClock()
         loadApps()
@@ -161,7 +165,6 @@ class MainActivity : Activity() {
         super.onResume()
         if (underwater) ocean.start() else bg.start()
         updateClock()
-        homeLayer.postDelayed({ syncWallpaper() }, 1500)
         // shake 3x to toggle underwater mode
         sensors.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)?.let {
             sensors.registerListener(shake, it, SensorManager.SENSOR_DELAY_UI)
@@ -170,6 +173,9 @@ class MainActivity : Activity() {
 
     override fun onPause() {
         super.onPause()
+        // apply the themed wallpaper only while you're away from home, so Android's recolor
+        // (which briefly restarts the launcher) never interrupts you
+        syncWallpaper()
         bg.stop(); ocean.stop()
         sensors.unregisterListener(shake)
     }
@@ -479,6 +485,7 @@ class MainActivity : Activity() {
                 }
                 .sortedBy { it.label.lowercase() }
             runOnUiThread {
+                appCache = list
                 allApps = list
                 seedDockDefaults()
                 seedHome()
@@ -522,6 +529,7 @@ class MainActivity : Activity() {
     }
 
     private fun refreshDock() {
+        if (allApps.isEmpty()) return // still loading: keep whatever is showing
         dock.removeAllViews()
         for (i in 0 until DOCK_SLOTS) {
             val app = favAt(i)
@@ -685,8 +693,8 @@ class MainActivity : Activity() {
                     3 -> launchIntent(Intent(Settings.ACTION_HOME_SETTINGS))
                     4 -> toggleUnderwater()
                     5 -> {
-                        prefs.edit().putBoolean("wallpaper", !useWallpaper).apply()
-                        if (useWallpaper) syncWallpaper(force = true)
+                        prefs.edit().putBoolean("wallpaper", !useWallpaper).remove("wp_key").apply()
+                        if (useWallpaper) toast("your wallpaper updates next time you leave home \u2727")
                     }
                 }
                 true
@@ -720,7 +728,6 @@ class MainActivity : Activity() {
         prefs.edit().putInt(paletteKey, idx).apply()
         applyPalette()
         toast("${palette.spark} ${palette.name}")
-        homeLayer.postDelayed({ syncWallpaper() }, 800)
     }
 
     private fun currentPalette(): Palette =
@@ -748,7 +755,6 @@ class MainActivity : Activity() {
             toast("✦ back to the forest ✦")
         }
         applyPalette()
-        homeLayer.postDelayed({ syncWallpaper() }, 5000) // after the bubble burst settles
     }
 
     private fun appInfo(app: AppEntry) = launchIntent(
