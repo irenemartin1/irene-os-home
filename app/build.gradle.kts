@@ -9,10 +9,11 @@ android {
 
     defaultConfig {
         applicationId = "app.irene.pastel"
-        minSdk = 30          // Pixel 4 runs Android 13 (API 33)
+        minSdk = 30          // Pixel 4a runs Android 13 (API 33)
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0"
+        // every GitHub build gets a higher number, so new versions install right over the old one
+        versionCode = (System.getenv("GITHUB_RUN_NUMBER") ?: "1").toInt()
+        versionName = "1." + (System.getenv("GITHUB_RUN_NUMBER") ?: "0")
     }
 
     buildTypes {
