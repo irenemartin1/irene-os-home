@@ -9,6 +9,8 @@
     <uses-permission android:name="android.permission.EXPAND_STATUS_BAR" />
     <!-- "uninstall" in the long-press menu -->
     <uses-permission android:name="android.permission.REQUEST_DELETE_PACKAGES" />
+    <!-- paints the Irene OS scene as the phone wallpaper + lock screen -->
+    <uses-permission android:name="android.permission.SET_WALLPAPER" />
 
     <application
         android:allowBackup="true"
