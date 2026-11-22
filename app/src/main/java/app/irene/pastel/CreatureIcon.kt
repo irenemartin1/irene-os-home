@@ -29,11 +29,13 @@ class CreatureIcon(
     private val underwater: Boolean,
     seed: Int,
     private val d: Float,             // screen density
-    private val glow: Int
+    private val glow: Int,
+    private val world: World? = null  // any other Irene OS theme: the creature wears that theme's look
 ) : Drawable() {
 
     private val kind = Math.floorMod(seed, 8)
-    private val body = bodyColor or 0xFF000000.toInt()
+    private val body = if (world != null) ThemeDress.bodyFor(world, bodyColor) else bodyColor or 0xFF000000.toInt()
+    private val dress = world?.let { ThemeDress(it, body) }
     private val dark = shade(body, 0.5f)
     private val light = tint(body, 0.62f)
     private val fill = Paint(Paint.ANTI_ALIAS_FLAG)
@@ -53,7 +55,7 @@ class CreatureIcon(
         fill.color = alpha(glow, 45)
         c.drawCircle(cx, cy, r * 1.45f, fill)
 
-        if (underwater) oceanBack(c, cx, cy, r) else forestBack(c, cx, cy, r)
+        if (dress != null) dress.back(c, cx, cy, r) else if (underwater) oceanBack(c, cx, cy, r) else forestBack(c, cx, cy, r)
 
         // body + belly
         fill.color = body
@@ -64,14 +66,21 @@ class CreatureIcon(
         c.drawCircle(cx, by, br, fill)
         drawArt(c, cx, by, br)
 
-        if (underwater) oceanFront(c, cx, cy, r) else forestFront(c, cx, cy, r)
+        if (dress != null) dress.front(c, cx, cy, r) else if (underwater) oceanFront(c, cx, cy, r) else forestFront(c, cx, cy, r)
 
         // face
-        val eyeY = if (!underwater && kind == 3) cy - r * 0.92f else cy - r * 0.42f
-        val eyeX = if (!underwater && kind == 3) r * 0.5f else r * 0.36f
-        val er = r * (if (!underwater && kind == 3) 0.2f else 0.17f)
-        eye(c, cx - eyeX, eyeY, er)
-        eye(c, cx + eyeX, eyeY, er)
+        val frog = dress == null && !underwater && kind == 3
+        val eyeY = if (frog) cy - r * 0.92f else cy - r * 0.42f
+        val eyeX = if (frog) r * 0.5f else r * 0.36f
+        val er = r * (if (frog) 0.2f else 0.17f)
+        if (world != null && ThemeDress.eyeStyle(world) == 1) {
+            fill.color = world.accent
+            c.drawCircle(cx - eyeX, eyeY, er * 0.8f, fill); c.drawCircle(cx + eyeX, eyeY, er * 0.8f, fill)
+            fill.color = 0xCCFFFFFF.toInt(); c.drawCircle(cx - eyeX, eyeY, er * 0.35f, fill); c.drawCircle(cx + eyeX, eyeY, er * 0.35f, fill)
+        } else {
+            eye(c, cx - eyeX, eyeY, er)
+            eye(c, cx + eyeX, eyeY, er)
+        }
         fill.color = 0x66FF7FB0
         c.drawCircle(cx - r * 0.62f, cy - r * 0.12f, r * 0.12f, fill)
         c.drawCircle(cx + r * 0.62f, cy - r * 0.12f, r * 0.12f, fill)
