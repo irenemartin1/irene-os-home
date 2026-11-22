@@ -93,6 +93,19 @@ sleep 1
 adb shell input keyevent KEYCODE_BACK
 sleep 2; shot 17-note
 
+# 7d. every Irene OS theme: home screen (+ the app drawer for a few)
+N=20
+for T in forest underwater digital nature gallery productivity studio kawaii bull mushroom coquette celestial romantic luxury coastal zen y2k retro cyber academia princess circuit circus disco fitness pride tropical groovy glass; do
+  adb shell am start -n app.irene.pastel/.MainActivity --es irene_theme $T
+  sleep 4; shot "$N-theme-$T"
+  case $T in kawaii|luxury|celestial|cyber)
+    adb shell input swipe $CX $((H * 6 / 10)) $CX $((H * 25 / 100)) 250
+    sleep 3; shot "$N-theme-$T-drawer"
+    adb shell input keyevent KEYCODE_BACK; sleep 2;;
+  esac
+  N=$((N + 1))
+done
+
 # 8. let it run a while, then check it is still alive + smooth
 sleep 20
 adb shell pidof app.irene.pastel > "$OUT/pid.txt"
