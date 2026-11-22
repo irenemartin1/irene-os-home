@@ -94,6 +94,7 @@ class ThemeSceneView(context: Context) : View(context) {
         val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         val c = Canvas(bmp)
         val W = w.toFloat(); val H = h.toFloat()
+        fill.color = Color.BLACK // fully opaque, so the sky never shows the old wallpaper through it
         val stops = FloatArray(world.sky.size) { it / (world.sky.size - 1f).coerceAtLeast(1f) }
         fill.shader = if (world.sky.size > 1) LinearGradient(0f, 0f, 0f, H, world.sky, stops, Shader.TileMode.CLAMP) else null
         if (world.sky.size == 1) fill.color = world.sky[0]
