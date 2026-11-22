@@ -105,6 +105,9 @@ class MainActivity : Activity() {
     private var shown: List<AppEntry> = emptyList()
     private var palette = Palettes.all[0]
     private var underwater = false
+    private var world: World? = null          // any other Irene OS theme (null = fairy forest / underwater)
+    private lateinit var scene: ThemeSceneView
+    private val themeKey get() = prefs.getString("theme", null) ?: if (prefs.getBoolean("underwater", false)) "underwater" else "forest"
     private lateinit var ocean: OceanView
     private lateinit var sensors: SensorManager
     private val shake = ShakeDetector { toggleUnderwater() }
@@ -128,7 +131,8 @@ class MainActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         prefs = getSharedPreferences("pastel", MODE_PRIVATE)
-        underwater = prefs.getBoolean("underwater", false)
+        underwater = themeKey == "underwater"
+        world = Worlds.byKey(themeKey)
         palette = currentPalette()
         sensors = getSystemService(SENSOR_SERVICE) as SensorManager
 
@@ -141,10 +145,10 @@ class MainActivity : Activity() {
                 WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS
         window.insetsController?.setSystemBarsAppearance(0, light)
 
-        ocean.alpha = if (underwater) 1f else 0f
-        // only the active world is drawn (the hidden one costs nothing)
-        ocean.visibility = if (underwater) View.VISIBLE else View.INVISIBLE
-        bg.visibility = if (underwater) View.INVISIBLE else View.VISIBLE
+        // only the active scene is drawn (the hidden ones cost nothing)
+        for (v in listOf<View>(bg, ocean, scene)) { v.alpha = 0f; v.visibility = View.INVISIBLE }
+        activeScene().apply { alpha = 1f; visibility = View.VISIBLE }
+        world?.let { scene.world = it }
         bg.palette = Palettes.all[prefs.getInt("palette", 0).coerceIn(0, Palettes.all.lastIndex)]
         if (appCache.isNotEmpty()) { allApps = appCache; shown = appCache }
         applyPalette()
@@ -166,7 +170,7 @@ class MainActivity : Activity() {
     override fun onResume() {
         super.onResume()
         HealthSync.maybeSync(this) // hourly, only if health sync is on
-        if (underwater) ocean.start() else bg.start()
+        runScene(activeScene(), true)
         updateClock()
         // shake 3x to toggle underwater mode
         sensors.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)?.let {
@@ -179,7 +183,7 @@ class MainActivity : Activity() {
         // apply the themed wallpaper only while you're away from home, so Android's recolor
         // (which briefly restarts the launcher) never interrupts you
         syncWallpaper()
-        bg.stop(); ocean.stop()
+        bg.stop(); ocean.stop(); scene.stop()
         sensors.unregisterListener(shake)
     }
 
@@ -203,6 +207,11 @@ class MainActivity : Activity() {
     // Home button pressed while already home
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        // used by the automatic tests to flip through every theme
+        intent.getStringExtra("irene_theme")?.let { k ->
+            if (Worlds.entries.any { it.key == k } && k != themeKey) setTheme(k)
+            return
+        }
         if (drawerOpen) closeDrawer()
         else if (homePage != 0) { homePage = 0; refreshHome() } // Home press -> back to page 1
     }
@@ -317,6 +326,8 @@ class MainActivity : Activity() {
         root.addView(bg, match())
         ocean = OceanView(this)
         root.addView(ocean, match())
+        scene = ThemeSceneView(this)
+        root.addView(scene, match())
 
         // HOME
         homeLayer = LinearLayout(this).apply {
@@ -453,9 +464,13 @@ class MainActivity : Activity() {
     }
 
     private fun applyPalette() {
-        if (underwater) ocean.palette = palette else bg.palette = palette
+        val w = world
+        if (underwater) ocean.palette = palette else if (w == null) bg.palette = palette else if (scene.world !== w) scene.world = w
+        // light themes (Kawaii, Coquette, Zen…) get dark status-bar icons, dark themes get white ones
+        val barFlags = WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS or WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS
+        window.insetsController?.setSystemBarsAppearance(if (w != null && !w.dark) barFlags else 0, barFlags)
         brandText.text = if (underwater) "◦ irene os ◦" else "✦ irene os ✦"
-        hintText.text = if (underwater) "swipe up for all apps ◦" else "swipe up for all apps ✧"
+        hintText.text = when { w != null -> "swipe up for all apps ${w.emoji}"; underwater -> "swipe up for all apps ◦"; else -> "swipe up for all apps ✧" }
         listOf(clockText, noteCard).forEach { it.setTextColor(palette.ink) }
         listOf(dateText, greetText, hintText, brandText).forEach { it.setTextColor(palette.soft) }
         brandText.setShadowLayer(dp(8).toFloat(), 0f, 0f, palette.glow)
@@ -615,7 +630,7 @@ class MainActivity : Activity() {
 
     private fun closeDrawer() = settleDrawer(false)
 
-    private fun searchHint() = if (underwater) "search enchanted underwater ◦" else "search the enchanted forest ✿"
+    private fun searchHint() = if (world != null) "search ${world!!.name.lowercase()} ${world!!.emoji}" else if (underwater) "search enchanted underwater ◦" else "search the enchanted forest ✿"
 
     // ── drawer motion (shared by taps, swipes and the Home button) ──
     private var drawerProgress = 0f       // 0 = closed, 1 = fully open
@@ -713,7 +728,8 @@ class MainActivity : Activity() {
 
     private fun settingsMenu(anchor: View) {
         PopupMenu(this, anchor).apply {
-            menu.add(0, 0, 0, "next palette")
+            menu.add(0, 7, 0, "change theme ✦ (${Worlds.entries.firstOrNull { e -> e.key == themeKey }?.label ?: "fairy"})")
+            if (world == null) menu.add(0, 0, 0, "next color mood")
             menu.add(0, 1, 1, if (themedIcons) "creature icons: on ✓" else "creature icons: off")
             menu.add(0, 2, 2, "change my name")
             menu.add(0, 3, 3, "set as default home app")
@@ -722,6 +738,7 @@ class MainActivity : Activity() {
             menu.add(0, 6, 6, if (HealthSync.key(this@MainActivity).isBlank()) "health sync ♡" else "health sync ♡ (sync now)")
             setOnMenuItemClickListener {
                 when (it.itemId) {
+                    7 -> themePicker()
                     0 -> nextPalette()
                     1 -> { prefs.edit().putBoolean("themed", !themedIcons).apply(); applyPalette() }
                     2 -> textDialog("what should i call you?", userName) { v ->
@@ -795,6 +812,7 @@ class MainActivity : Activity() {
     }
 
     private fun nextPalette() {
+        if (world != null) { themePicker(); return }
         val idx = (moods.indexOf(palette) + 1) % moods.size
         palette = moods[idx]
         prefs.edit().putInt(paletteKey, idx).apply()
@@ -802,31 +820,63 @@ class MainActivity : Activity() {
         toast("${palette.spark} ${palette.name}")
     }
 
-    private fun currentPalette(): Palette =
+    private fun currentPalette(): Palette = world?.palette() ?:
         moods[prefs.getInt(paletteKey, 0).coerceIn(0, moods.lastIndex)]
 
-    /** Shake 3x (or settings menu): dive into the ocean / come back to the forest. */
+    /** Shake 3x (or settings menu): dive underwater / come back to the theme you were on. */
     private fun toggleUnderwater() {
-        underwater = !underwater
-        prefs.edit().putBoolean("underwater", underwater).apply()
+        setTheme(if (underwater) (prefs.getString("theme_land", "forest") ?: "forest") else "underwater")
+    }
+
+    /** Every Irene OS theme, plus the fairy forest and underwater worlds. */
+    private fun themePicker() {
+        val items = Worlds.entries
+        val cur = items.indexOfFirst { it.key == themeKey }
+        AlertDialog.Builder(this)
+            .setTitle("choose your irene os theme ✦")
+            .setSingleChoiceItems(items.map { "${it.label}\n   ${it.desc}" }.toTypedArray(), cur) { dlg, which ->
+                dlg.dismiss()
+                if (items[which].key != themeKey) setTheme(items[which].key)
+            }
+            .setNegativeButton("close", null)
+            .show()
+    }
+
+    private fun setTheme(key: String) {
+        val wasUnder = underwater
+        underwater = key == "underwater"
+        world = Worlds.byKey(key)
+        prefs.edit().putString("theme", key).putBoolean("underwater", underwater).apply()
+        if (!underwater) prefs.edit().putString("theme_land", key).apply()
         palette = currentPalette()
         window.decorView.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
-        if (underwater) {
-            ocean.palette = palette
-            ocean.visibility = View.VISIBLE
-            ocean.start()
-            ocean.animate().alpha(1f).setDuration(700)
-                .withEndAction { if (underwater) { bg.stop(); bg.visibility = View.INVISIBLE } }.start()
-            ocean.post { ocean.burst() }
-            toast("◦ enchanted underwater ◦")
-        } else {
-            bg.visibility = View.VISIBLE
-            bg.start()
-            ocean.animate().alpha(0f).setDuration(700)
-                .withEndAction { if (!underwater) { ocean.stop(); ocean.visibility = View.INVISIBLE } }.start()
-            toast("✦ enchanted forest ✦")
+        world?.let { scene.world = it }
+        if (underwater) ocean.palette = palette else if (world == null) bg.palette = palette
+        val active = activeScene()
+        for (v in listOf<View>(bg, ocean, scene)) {
+            v.animate().cancel()
+            if (v === active) {
+                if (v.visibility != View.VISIBLE) { v.alpha = 0f; v.visibility = View.VISIBLE }
+                runScene(v, true)
+                v.animate().alpha(1f).setDuration(650).start()
+            } else if (v.visibility == View.VISIBLE) {
+                v.animate().alpha(0f).setDuration(650)
+                    .withEndAction { if (activeScene() !== v) { runScene(v, false); v.visibility = View.INVISIBLE } }.start()
+            }
         }
+        if (underwater && !wasUnder) ocean.post { ocean.burst() }
+        toast(world?.let { "${it.emoji} ${it.name}" } ?: if (underwater) "◦ enchanted underwater ◦" else "✦ enchanted forest ✦")
         applyPalette()
+    }
+
+    private fun activeScene(): View = when { world != null -> scene; underwater -> ocean; else -> bg }
+
+    private fun runScene(v: View, on: Boolean) {
+        when {
+            v === bg -> if (on) bg.start() else bg.stop()
+            v === ocean -> if (on) ocean.start() else ocean.stop()
+            v === scene -> if (on) scene.start() else scene.stop()
+        }
     }
 
     private fun appInfo(app: AppEntry) = launchIntent(
@@ -867,7 +917,7 @@ class MainActivity : Activity() {
             // the app itself, turned into a little forest / sea creature in the app's own colors
             val art = if (mono != null) fresh(mono) else fresh(app.icon)
             img.setPadding(0, 0, 0, 0)
-            img.setImageDrawable(CreatureIcon(art, mono != null, app.color, underwater, seed, density, palette.glow))
+            img.setImageDrawable(CreatureIcon(art, mono != null, app.color, underwater, seed, density, palette.glow, world))
         } else {
             img.setPadding(dp(9), dp(9), dp(9), dp(9))
             img.setImageDrawable(fresh(app.icon))
@@ -1018,7 +1068,7 @@ class MainActivity : Activity() {
         val img = ImageView(this).apply {
             setImageDrawable(
                 if (themedIcons) CreatureIcon(if (mono != null) fresh(mono) else fresh(app.icon), mono != null, app.color,
-                    underwater, seed, resources.displayMetrics.density, palette.glow)
+                    underwater, seed, resources.displayMetrics.density, palette.glow, world)
                 else fresh(app.icon)
             )
             scaleX = 1.2f; scaleY = 1.2f
@@ -1147,9 +1197,9 @@ class MainActivity : Activity() {
      */
     private fun syncWallpaper(force: Boolean = false) {
         if (!useWallpaper) return
-        val key = (if (underwater) "ocean:" else "forest:") + palette.name + ":v1"
+        val key = themeKey + ":" + palette.name + ":v2"
         if (!force && prefs.getString("wp_key", null) == key) return
-        val scene: View = if (underwater) ocean else bg
+        val scene: View = activeScene()
         if (scene.width == 0 || scene.height == 0) return
         val bmp = try {
             Bitmap.createBitmap(scene.width, scene.height, Bitmap.Config.ARGB_8888).also { scene.draw(Canvas(it)) }
