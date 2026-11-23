@@ -56,7 +56,7 @@ class ThemeSceneView(context: Context) : View(context) {
         ps.clear()
         val w = width.toFloat(); val h = height.toFloat()
         if (w == 0f) return
-        val n = when (world.particle) { Particles.NONE -> 0; Particles.STARS, Particles.DOTS -> 55; Particles.TICKERS -> 14; else -> 22 }
+        val n = when (world.particle) { Particles.NONE -> 0; Particles.STARS, Particles.DOTS, Particles.SNOW -> 55; Particles.TICKERS -> 14; else -> 22 }
         val cs = colors()
         repeat(n) { i ->
             ps += P(rnd.nextFloat() * w, rnd.nextFloat() * h, (3 + rnd.nextFloat() * 6) * d,
@@ -69,7 +69,7 @@ class ThemeSceneView(context: Context) : View(context) {
         val w = width.toFloat(); val h = height.toFloat()
         for (p in ps) when (world.particle) {
             Particles.STARS, Particles.DOTS, Particles.SPARKLES -> {} // they twinkle in place
-            Particles.TICKERS, Particles.BUBBLES, Particles.EMBERS, Particles.HEARTS -> { // drift up
+            Particles.TICKERS, Particles.BUBBLES, Particles.EMBERS, Particles.HEARTS, Particles.PAWS, Particles.SMILEYS -> { // drift up
                 p.y -= p.speed * 2; p.x += sin(t + p.phase) * 0.5f
                 if (p.y < -20 * d) { p.y = h + 20 * d; p.x = rnd.nextFloat() * w }
             }
@@ -253,6 +253,117 @@ class ThemeSceneView(context: Context) : View(context) {
                 path.lineTo(W, H); path.lineTo(0f, H); path.close()
                 fill.color = World.withAlpha(world.accent, 30); c.drawPath(path, fill)
             }
+            Grounds.SAVANNA -> {
+                fill.color = World.withAlpha(Color.parseColor("#ffb347"), 120); c.drawCircle(W * 0.72f, H * 0.78f, W * 0.2f, fill)
+                hill(c, W, H, 0.86f, W, World.withAlpha(Color.parseColor("#d9a55a"), 200))
+                acacia(c, W * 0.2f, H * 0.87f, W * 0.22f, World.mix(world.fg, world.base, 0.25f))
+                acacia(c, W * 0.86f, H * 0.88f, W * 0.15f, World.mix(world.fg, world.base, 0.35f))
+            }
+            Grounds.PARK -> {
+                hill(c, W, H, 0.88f, W, World.withAlpha(world.inColor, 130)); hill(c, W, H, 0.92f, W, World.withAlpha(world.inColor, 200))
+                line.color = World.withAlpha(Color.WHITE, 230); line.strokeWidth = 4 * d
+                var x = 8 * d
+                while (x < W) { c.drawLine(x, H * 0.86f, x, H * 0.92f, line); x += 22 * d }
+                c.drawLine(0f, H * 0.875f, W, H * 0.875f, line); c.drawLine(0f, H * 0.9f, W, H * 0.9f, line)
+                fill.color = Color.parseColor("#d7e84a"); c.drawCircle(W * 0.3f, H * 0.95f, 9 * d, fill)
+                line.color = World.withAlpha(Color.WHITE, 220); line.strokeWidth = 1.5f * d
+                rect.set(W * 0.3f - 12 * d, H * 0.95f - 9 * d, W * 0.3f - 2 * d, H * 0.95f + 9 * d); c.drawArc(rect, -60f, 120f, false, line)
+            }
+            Grounds.DOMES -> {
+                fill.color = World.withAlpha(Color.parseColor("#9fd3f5"), 110); c.drawRect(0f, H * 0.9f, W, H, fill)
+                val houses = listOf(floatArrayOf(0.02f, 0.2f, 0.1f), floatArrayOf(0.2f, 0.22f, 0.14f), floatArrayOf(0.44f, 0.18f, 0.08f), floatArrayOf(0.6f, 0.24f, 0.12f), floatArrayOf(0.82f, 0.18f, 0.1f))
+                for ((x0, bw, bh) in houses) {
+                    fill.color = Color.WHITE; c.drawRect(W * x0, H * (0.9f - bh), W * (x0 + bw), H * 0.9f, fill)
+                    line.color = World.withAlpha(world.fg, 30); line.strokeWidth = 1 * d; c.drawRect(W * x0, H * (0.9f - bh), W * (x0 + bw), H * 0.9f, line)
+                    fill.color = world.accent
+                    rect.set(W * (x0 + bw * 0.25f), H * (0.9f - bh) - W * bw * 0.25f, W * (x0 + bw * 0.75f), H * (0.9f - bh) + W * bw * 0.25f); c.drawArc(rect, 180f, 180f, true, fill)
+                    fill.color = World.withAlpha(world.accent, 200); c.drawRect(W * (x0 + bw * 0.4f), H * (0.9f - bh * 0.45f), W * (x0 + bw * 0.6f), H * 0.9f, fill)
+                }
+            }
+            Grounds.SPOTS -> {
+                repeat(26) {
+                    val x = rnd.nextFloat() * W; val y = rnd.nextFloat() * H; val s = (10 + rnd.nextFloat() * 16) * d
+                    line.color = World.withAlpha(world.accent, 45); line.strokeWidth = s * 0.28f
+                    rect.set(x - s, y - s * 0.7f, x + s, y + s * 0.7f); c.drawArc(rect, rnd.nextFloat() * 90f, 230f, false, line)
+                    fill.color = World.withAlpha(world.accent, 25); c.drawOval(rect.apply { inset(s * 0.35f, s * 0.25f) }, fill)
+                }
+            }
+            Grounds.TILE_ROW -> {
+                val cell = W / 6
+                for (r in 0 until 3) for (col in 0 until 6) {
+                    val x0 = col * cell; val y0 = H - (r + 1) * cell
+                    fill.color = Color.WHITE; c.drawRect(x0, y0, x0 + cell, y0 + cell, fill)
+                    line.color = World.withAlpha(world.accent, 200); line.strokeWidth = 1.5f * d; c.drawRect(x0, y0, x0 + cell, y0 + cell, line)
+                    fill.color = World.withAlpha(world.accent, 210)
+                    val mx = x0 + cell / 2; val my = y0 + cell / 2
+                    for (k in 0 until 4) { c.save(); c.rotate(k * 90f + 45f, mx, my); rect.set(mx - cell * 0.08f, my - cell * 0.38f, mx + cell * 0.08f, my - cell * 0.06f); c.drawOval(rect, fill); c.restore() }
+                    c.drawCircle(mx, my, cell * 0.07f, fill)
+                    for ((cx0, cy0) in listOf(x0 to y0, x0 + cell to y0, x0 to y0 + cell, x0 + cell to y0 + cell)) c.drawCircle(cx0, cy0, cell * 0.1f, fill)
+                }
+            }
+            Grounds.GINGHAM -> {
+                val sq = 22 * d
+                fill.color = World.withAlpha(world.accent, 22)
+                var x = 0f
+                while (x < W) { c.drawRect(x, 0f, x + sq, H, fill); x += sq * 2 }
+                var y = 0f
+                while (y < H) { c.drawRect(0f, y, W, y + sq, fill); y += sq * 2 }
+                hill(c, W, H, 0.9f, W, World.withAlpha(world.inColor, 90))
+            }
+            Grounds.STICKERS -> {
+                val cs = colors()
+                repeat(16) { i ->
+                    val x = rnd.nextFloat() * W; val y = rnd.nextFloat() * H; val s = (14 + rnd.nextFloat() * 12) * d
+                    c.save(); c.rotate(rnd.nextFloat() * 50f - 25f, x, y)
+                    fill.color = Color.WHITE
+                    when (i % 4) {
+                        0 -> { c.drawCircle(x, y, s * 1.15f, fill); fill.color = World.withAlpha(cs[i % 4], 150); star5(c, x, y, s) }
+                        1 -> { heartPath(x, y, s * 1.2f); c.drawPath(path, fill); fill.color = World.withAlpha(cs[i % 4], 150); heartPath(x, y, s); c.drawPath(path, fill) }
+                        2 -> { c.drawCircle(x, y, s * 1.1f, fill); fill.color = World.withAlpha(Color.parseColor("#ffd23f"), 170); c.drawCircle(x, y, s, fill)
+                               fill.color = World.withAlpha(world.fg, 170); c.drawCircle(x - s * 0.35f, y - s * 0.2f, s * 0.12f, fill); c.drawCircle(x + s * 0.35f, y - s * 0.2f, s * 0.12f, fill)
+                               line.color = fill.color; line.strokeWidth = s * 0.1f; rect.set(x - s * 0.5f, y - s * 0.4f, x + s * 0.5f, y + s * 0.5f); c.drawArc(rect, 30f, 120f, false, line) }
+                        else -> { rect.set(x - s * 1.2f, y - s * 0.8f, x + s * 1.2f, y + s * 0.8f); c.drawRoundRect(rect, s * 0.3f, s * 0.3f, fill); fill.color = World.withAlpha(cs[i % 4], 140); rect.inset(s * 0.15f, s * 0.15f); c.drawRoundRect(rect, s * 0.25f, s * 0.25f, fill) }
+                    }
+                    c.restore()
+                }
+            }
+            Grounds.TORN -> {
+                for (k in 0 until 2) {
+                    fill.color = if (k == 0) World.withAlpha(Color.parseColor("#e8e0d0"), 30) else World.withAlpha(world.accent, 35)
+                    path.reset(); val top = if (k == 0) H * 0.08f else H * 0.82f
+                    path.moveTo(0f, if (k == 0) 0f else H)
+                    var x = 0f
+                    while (x <= W) { path.lineTo(x, top + (rnd.nextFloat() - 0.5f) * 14 * d); x += 9 * d }
+                    path.lineTo(W, if (k == 0) 0f else H); path.close(); c.drawPath(path, fill)
+                }
+                line.color = World.withAlpha(world.accent, 40); line.strokeWidth = 3 * d
+                var y = H * 0.84f
+                while (y < H) { c.drawLine(0f, y, W, y, line); y += 18 * d }
+                var x = 0f
+                while (x < W) { c.drawLine(x, H * 0.82f, x, H, line); x += 18 * d }
+            }
+            Grounds.CHECKER -> {
+                val sq = W / 10
+                for (r in 0 until 3) for (col in 0 until 10) if ((r + col) % 2 == 0) {
+                    fill.color = World.withAlpha(world.fg, 50); c.drawRect(col * sq, H - (r + 1) * sq, (col + 1) * sq, H - r * sq, fill)
+                }
+                fill.color = World.withAlpha(Color.parseColor("#ffd23f"), 120); c.drawCircle(W * 0.82f, H * 0.12f, 26 * d, fill)
+            }
+            Grounds.XMAS -> {
+                hill(c, W, H, 0.88f, W, Color.WHITE); hill(c, W, H, 0.92f, W, World.withAlpha(Color.parseColor("#e6eff6"), 255))
+                for ((fx, s) in listOf(0.16f to 1f, 0.84f to 0.75f)) {
+                    val x = W * fx; val y = H * 0.9f; val h = H * 0.2f * s
+                    fill.color = World.withAlpha(world.inColor, 230)
+                    for (k in 0 until 3) { path.reset(); val ty = y - h + k * h * 0.28f; path.moveTo(x, ty); path.lineTo(x - h * (0.22f + k * 0.08f), ty + h * 0.38f); path.lineTo(x + h * (0.22f + k * 0.08f), ty + h * 0.38f); path.close(); c.drawPath(path, fill) }
+                    fill.color = Color.parseColor("#ffd23f"); star5(c, x, y - h, h * 0.07f)
+                    val bulbs = intArrayOf(world.accent, Color.parseColor("#ffd23f"), Color.parseColor("#4dabf7"))
+                    for (k in 0 until 7) { fill.color = bulbs[k % 3]; c.drawCircle(x + (k - 3) * h * 0.07f, y - h * 0.35f + kotlin.math.abs(k - 3) * h * 0.04f, 3 * d, fill) }
+                }
+                line.color = World.withAlpha(world.fg, 80); line.strokeWidth = 1 * d
+                path.reset(); path.moveTo(0f, H * 0.05f); path.quadTo(W * 0.5f, H * 0.11f, W, H * 0.05f); c.drawPath(path, line)
+                val bulbs = intArrayOf(world.accent, Color.parseColor("#ffd23f"), world.inColor, Color.parseColor("#4dabf7"))
+                for (k in 1 until 12) { val x = W * k / 12; val y = H * 0.05f + (1 - ((x / W - 0.5f) * 2).let { it * it }) * H * 0.045f; fill.color = bulbs[k % 4]; c.drawCircle(x, y + 5 * d, 4.5f * d, fill) }
+            }
             Grounds.SUNSET -> {
                 val sunC = World.withAlpha(world.accent, 90)
                 fill.color = sunC; c.drawCircle(W * 0.5f, H * 0.9f, W * 0.32f, fill)
@@ -267,6 +378,24 @@ class ThemeSceneView(context: Context) : View(context) {
                 }
             }
         }
+    }
+
+    private fun acacia(c: Canvas, x: Float, y: Float, s: Float, col: Int) {
+        line.color = col; line.strokeWidth = s * 0.06f
+        c.drawLine(x, y, x, y - s * 0.7f, line); c.drawLine(x, y - s * 0.5f, x - s * 0.3f, y - s * 0.8f, line); c.drawLine(x, y - s * 0.55f, x + s * 0.3f, y - s * 0.82f, line)
+        fill.color = col; rect.set(x - s * 0.7f, y - s * 1.0f, x + s * 0.7f, y - s * 0.72f); c.drawOval(rect, fill)
+    }
+
+    private fun star5(c: Canvas, x: Float, y: Float, s: Float) {
+        path.reset()
+        for (k in 0 until 10) { val rr = if (k % 2 == 0) s else s * 0.45f; val an = -PI / 2 + k * PI / 5; val px = x + (rr * cos(an)).toFloat(); val py = y + (rr * sin(an)).toFloat(); if (k == 0) path.moveTo(px, py) else path.lineTo(px, py) }
+        path.close(); c.drawPath(path, fill)
+    }
+
+    private fun heartPath(x: Float, y: Float, s: Float) {
+        path.reset(); path.moveTo(x, y + s * 0.8f)
+        path.cubicTo(x - s * 1.3f, y - s * 0.1f, x - s * 0.6f, y - s * 1.1f, x, y - s * 0.35f)
+        path.cubicTo(x + s * 0.6f, y - s * 1.1f, x + s * 1.3f, y - s * 0.1f, x, y + s * 0.8f); path.close()
     }
 
     private fun hill(c: Canvas, W: Float, H: Float, top: Float, span: Float, col: Int) {
@@ -343,6 +472,29 @@ class ThemeSceneView(context: Context) : View(context) {
                 fill.color = World.withAlpha(if (up) world.inColor else world.outColor, 120)
                 c.drawRect(p.x - s * 0.3f, p.y - s * 1.4f, p.x + s * 0.3f, p.y + s * 1.4f, fill)
                 line.color = fill.color; line.strokeWidth = 1.2f * d; c.drawLine(p.x, p.y - s * 2.1f, p.x, p.y + s * 2.1f, line)
+            }
+            Particles.SNOW -> { fill.color = World.withAlpha(Color.WHITE, 230); c.drawCircle(p.x, p.y, s * 0.32f, fill); fill.color = World.withAlpha(Color.parseColor("#b8c9d9"), 120); c.drawCircle(p.x, p.y, s * 0.12f, fill) }
+            Particles.PAWS -> {
+                fill.color = World.withAlpha(p.color, 70)
+                rect.set(p.x - s * 0.5f, p.y - s * 0.1f, p.x + s * 0.5f, p.y + s * 0.6f); c.drawOval(rect, fill)
+                for (k in -1..1) c.drawCircle(p.x + k * s * 0.42f, p.y - s * 0.4f + kotlin.math.abs(k) * s * 0.18f, s * 0.2f, fill)
+            }
+            Particles.LEMONS -> {
+                c.save(); c.rotate(t * 25 + p.phase * 50, p.x, p.y)
+                fill.color = World.withAlpha(Color.parseColor("#ffd93b"), 200); rect.set(p.x - s * 0.8f, p.y - s * 0.55f, p.x + s * 0.8f, p.y + s * 0.55f); c.drawOval(rect, fill)
+                fill.color = World.withAlpha(Color.parseColor("#5d9b4a"), 200); rect.set(p.x + s * 0.4f, p.y - s * 0.95f, p.x + s * 1.1f, p.y - s * 0.55f); c.drawOval(rect, fill)
+                c.restore()
+            }
+            Particles.TENNIS -> {
+                fill.color = World.withAlpha(Color.parseColor("#d7e84a"), 210); c.drawCircle(p.x, p.y, s * 0.6f, fill)
+                line.color = World.withAlpha(Color.WHITE, 230); line.strokeWidth = s * 0.1f
+                rect.set(p.x - s * 0.9f, p.y - s * 0.6f, p.x - s * 0.1f, p.y + s * 0.6f); c.drawArc(rect, -60f, 120f, false, line)
+                rect.set(p.x + s * 0.1f, p.y - s * 0.6f, p.x + s * 0.9f, p.y + s * 0.6f); c.drawArc(rect, 120f, 120f, false, line)
+            }
+            Particles.SMILEYS -> {
+                fill.color = World.withAlpha(Color.parseColor("#ffd23f"), 150); c.drawCircle(p.x, p.y, s * 0.7f, fill)
+                fill.color = World.withAlpha(world.fg, 150); c.drawCircle(p.x - s * 0.25f, p.y - s * 0.15f, s * 0.08f, fill); c.drawCircle(p.x + s * 0.25f, p.y - s * 0.15f, s * 0.08f, fill)
+                line.color = fill.color; line.strokeWidth = s * 0.08f; rect.set(p.x - s * 0.35f, p.y - s * 0.25f, p.x + s * 0.35f, p.y + s * 0.38f); c.drawArc(rect, 30f, 120f, false, line)
             }
             Particles.NOTES -> { fill.color = World.withAlpha(p.color, 160); c.drawCircle(p.x, p.y, s * 0.4f, fill); line.color = fill.color; line.strokeWidth = 1.5f * d; c.drawLine(p.x + s * 0.4f, p.y, p.x + s * 0.4f, p.y - s * 1.4f, line) }
         }
