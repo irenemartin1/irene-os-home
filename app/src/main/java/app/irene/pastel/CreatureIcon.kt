@@ -30,12 +30,13 @@ class CreatureIcon(
     seed: Int,
     private val d: Float,             // screen density
     private val glow: Int,
-    private val world: World? = null  // any other Irene OS theme: the creature wears that theme's look
+    private val world: World? = null, // any other Irene OS theme: the creature is one of that theme's characters
+    private val role: Int = Props.NONE // what the app is for → what the creature holds (map pin, camera, letter…)
 ) : Drawable() {
 
     private val kind = Math.floorMod(seed, 8)
-    private val body = if (world != null) ThemeDress.bodyFor(world, bodyColor) else bodyColor or 0xFF000000.toInt()
-    private val dress = world?.let { ThemeDress(it, body) }
+    private val dress = world?.let { ThemeDress(it, bodyColor, seed) }
+    private val body = dress?.body ?: (bodyColor or 0xFF000000.toInt())
     private val dark = shade(body, 0.5f)
     private val light = tint(body, 0.62f)
     private val fill = Paint(Paint.ANTI_ALIAS_FLAG)
@@ -60,6 +61,7 @@ class CreatureIcon(
         // body + belly
         fill.color = body
         c.drawCircle(cx, cy, r, fill)
+        dress?.skin(c, cx, cy, r)
         val br = r * 0.56f
         val by = cy + r * 0.24f
         fill.color = light
@@ -73,7 +75,10 @@ class CreatureIcon(
         val eyeY = if (frog) cy - r * 0.92f else cy - r * 0.42f
         val eyeX = if (frog) r * 0.5f else r * 0.36f
         val er = r * (if (frog) 0.2f else 0.17f)
-        if (world != null && ThemeDress.eyeStyle(world) == 1) {
+        if (world != null && ThemeDress.eyeStyle(world) == 2) {
+            fill.color = 0xFF1A1A1A.toInt()
+            c.drawCircle(cx - eyeX, eyeY, er * 0.38f, fill); c.drawCircle(cx + eyeX, eyeY, er * 0.38f, fill)
+        } else if (world != null && ThemeDress.eyeStyle(world) == 1) {
             fill.color = world.accent
             c.drawCircle(cx - eyeX, eyeY, er * 0.8f, fill); c.drawCircle(cx + eyeX, eyeY, er * 0.8f, fill)
             fill.color = 0xCCFFFFFF.toInt(); c.drawCircle(cx - eyeX, eyeY, er * 0.35f, fill); c.drawCircle(cx + eyeX, eyeY, er * 0.35f, fill)
@@ -89,6 +94,14 @@ class CreatureIcon(
         fill.color = 0x55FFFFFF
         rect.set(cx - r * 0.72f, cy - r * 0.78f, cx - r * 0.3f, cy - r * 0.52f)
         c.drawOval(rect, fill)
+
+        // what this creature is holding: a drawing of what the app is for, in the theme's colors
+        val w = world
+        val tagBg = when { w == null -> 0xF2FFFFFF.toInt(); w.dark -> World.mix(w.base, w.accent, 0.22f); else -> w.card }
+        val tagInk = w?.fg ?: dark
+        val tagAccent = w?.accent ?: shade(body, 0.72f)
+        val charm = w?.emoji ?: if (underwater) "🐚" else "🍄"
+        Props.draw(c, role, cx + r * 0.84f, cy + r * 0.7f, r * 0.4f, tagBg, tagInk, tagAccent, charm)
     }
 
     // ───────── forest creatures ─────────
