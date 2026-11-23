@@ -57,6 +57,7 @@ object Particles {
     const val NONE = 0; const val STARS = 1; const val HEARTS = 2; const val PETALS = 3; const val CONFETTI = 4
     const val BUBBLES = 5; const val SPARKLES = 6; const val LEAVES = 7; const val TICKERS = 8; const val EMBERS = 9
     const val DAISIES = 10; const val BUTTERFLIES = 11; const val NOTES = 12; const val DOTS = 13
+    const val SNOW = 14; const val PAWS = 15; const val LEMONS = 16; const val TENNIS = 17; const val SMILEYS = 18
 }
 
 object Grounds {
@@ -64,6 +65,8 @@ object Grounds {
     const val DANCE_FLOOR = 5; const val BIG_TOP = 6; const val ZEN = 7; const val PALMS = 8; const val TRACES = 9
     const val BOOKS = 10; const val FRAMES = 11; const val CLOUDS = 12; const val CASTLE = 13; const val GRID = 14
     const val RAINBOW = 15; const val STAINED = 16; const val CHART = 17; const val SUNSET = 18
+    const val SAVANNA = 19; const val PARK = 20; const val DOMES = 21; const val SPOTS = 22; const val TILE_ROW = 23
+    const val GINGHAM = 24; const val STICKERS = 25; const val TORN = 26; const val CHECKER = 27; const val XMAS = 28
 }
 
 object Worlds {
@@ -154,6 +157,42 @@ object Worlds {
         World("glass", "Painted Glass", "🪟", "A glass fairy", "See-through stained glass in jewel colors.", false,
             c("#f3efe8"), c("#1f2430"), c("#2f5fd0"), c("#2a52b8"), c("#1f7a50"), c("#b8352a"), c("#ffffff"),
             intArrayOf(c("#f6f1e8"), c("#ece6dc")), Particles.SPARKLES, Grounds.STAINED),
+        World("wild", "Wild Animals", "🦁", "A lion cub", "Savanna sun, acacia trees and wild friends.", false,
+            c("#fbf1dc"), c("#3a2610"), c("#d9822b"), c("#b0611a"), c("#4f7a2a"), c("#b8452a"), c("#fffaf0"),
+            intArrayOf(c("#ffe3a8"), c("#fbf1dc"), c("#f1dcae")), Particles.EMBERS, Grounds.SAVANNA),
+        World("dogs", "Dogs", "🐶", "A puppy", "Paw prints, tennis balls and a very good pup.", false,
+            c("#f4f8ff"), c("#1f2a44"), c("#e8813a"), c("#c4621f"), c("#2f7d63"), c("#d14b4b"), c("#ffffff"),
+            intArrayOf(c("#e5f0ff"), c("#f4f8ff"), c("#e8f5e0")), Particles.PAWS, Grounds.PARK),
+        World("mediterranean", "Mediterranean", "🍋", "A Santorini cat", "Whitewashed walls, blue domes and lemons.", false,
+            c("#f7f9fc"), c("#0f2a4a"), c("#1f5fae"), c("#174c8d"), c("#3a7d44"), c("#c8443f"), c("#ffffff"),
+            intArrayOf(c("#ffffff"), c("#f4f8fd"), c("#dbe9f8")), Particles.LEMONS, Grounds.DOMES),
+        World("leopard", "Leopard", "🐆", "A leopard", "Leopard print, gold and a little attitude.", true,
+            c("#1a120b"), c("#f6e7cf"), c("#d9a35b"), c("#d9a35b"), c("#a6d68f"), c("#ff7a6b"), c("#2a1d12"),
+            intArrayOf(c("#3a2614"), c("#1a120b"), c("#1a120b")), Particles.SPARKLES, Grounds.SPOTS),
+        World("tiles", "Tiles", "🔷", "A painted tile bird", "Hand-painted blue and white tiles.", false,
+            c("#f7f5ef"), c("#14284b"), c("#1d4fa3"), c("#183f85"), c("#1f7a50"), c("#c0392b"), c("#ffffff"),
+            intArrayOf(c("#fbfaf6"), c("#f0ede4")), Particles.PETALS, Grounds.TILE_ROW),
+        World("preppy", "Preppy", "🎾", "A preppy you", "Pink and green, gingham, bows and tennis.", false,
+            c("#fff6f8"), c("#1c2a4a"), c("#e75a8a"), c("#c93d6e"), c("#2f8a5f"), c("#c0392b"), c("#ffffff"),
+            intArrayOf(c("#ffe4ec"), c("#fff6f8"), c("#e4f5ea")), Particles.TENNIS, Grounds.GINGHAM),
+        World("junk", "Junk Core", "🦝", "A raccoon", "Stickers, charms and happy clutter everywhere.", false,
+            c("#fff9e8"), c("#2a1d3a"), c("#ff3d9a"), c("#d9207c"), c("#2f9d5a"), c("#ff5a1f"), c("#ffffff"),
+            intArrayOf(c("#fff3c9"), c("#fff9e8"), c("#e9f7ff")), Particles.CONFETTI, Grounds.STICKERS),
+        World("grunge", "Grunge", "🐦‍⬛", "A crow", "Flannel, torn paper and loud guitars.", true,
+            c("#151414"), c("#ebe5da"), c("#c94a3e"), c("#c94a3e"), c("#9cbf5a"), c("#ef7464"), c("#242121"),
+            intArrayOf(c("#2a2322"), c("#151414"), c("#151414")), Particles.NOTES, Grounds.TORN),
+        World("indie", "Indie", "📷", "An indie kid", "Checkerboard, film cameras and smiley doodles.", false,
+            c("#fbf6e9"), c("#24302a"), c("#e2582e"), c("#c2431c"), c("#3c8d4a"), c("#d9442b"), c("#fffdf6"),
+            intArrayOf(c("#eef3d8"), c("#fbf6e9"), c("#ffe2c7")), Particles.SMILEYS, Grounds.CHECKER),
+        World("vsco", "VSCO", "🐚", "A sea turtle", "Sunsets, shells, scrunchies and save the turtles.", false,
+            c("#fff8f2"), c("#3b3340"), c("#ef7f99"), c("#d65c7a"), c("#2f9d95"), c("#e0605a"), c("#ffffff"),
+            intArrayOf(c("#ffd9c4"), c("#fff8f2"), c("#d7f2ee")), Particles.BUBBLES, Grounds.SUNSET),
+        World("minimal", "Minimalist", "🤍", "A paper crane", "Clean, quiet and nothing extra.", false,
+            c("#fafaf9"), c("#111111"), c("#111111"), c("#111111"), c("#2f6f4f"), c("#b3261e"), c("#ffffff"),
+            intArrayOf(c("#fafaf9"), c("#fafaf9")), Particles.NONE, Grounds.NONE),
+        World("christmas", "Christmas", "🎄", "A gingerbread friend", "Twinkle lights, snow, presents and cocoa.", false,
+            c("#fff8f2"), c("#2b1a14"), c("#c8102e"), c("#a50d26"), c("#1f7a4a"), c("#c8102e"), c("#ffffff"),
+            intArrayOf(c("#e6eff6"), c("#fff8f2"), c("#f6ebe2")), Particles.SNOW, Grounds.XMAS),
     )
 
     fun byKey(key: String): World? = all.firstOrNull { it.key == key }
