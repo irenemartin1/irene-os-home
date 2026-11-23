@@ -917,7 +917,7 @@ class MainActivity : Activity() {
             // the app itself, turned into a little forest / sea creature in the app's own colors
             val art = if (mono != null) fresh(mono) else fresh(app.icon)
             img.setPadding(0, 0, 0, 0)
-            img.setImageDrawable(CreatureIcon(art, mono != null, app.color, underwater, seed, density, palette.glow, world))
+            img.setImageDrawable(CreatureIcon(art, mono != null, app.color, underwater, seed, density, palette.glow, world, Props.roleOf(app.component.packageName, app.label.toString())))
         } else {
             img.setPadding(dp(9), dp(9), dp(9), dp(9))
             img.setImageDrawable(fresh(app.icon))
@@ -1068,7 +1068,7 @@ class MainActivity : Activity() {
         val img = ImageView(this).apply {
             setImageDrawable(
                 if (themedIcons) CreatureIcon(if (mono != null) fresh(mono) else fresh(app.icon), mono != null, app.color,
-                    underwater, seed, resources.displayMetrics.density, palette.glow, world)
+                    underwater, seed, resources.displayMetrics.density, palette.glow, world, Props.roleOf(app.component.packageName, app.label.toString()))
                 else fresh(app.icon)
             )
             scaleX = 1.2f; scaleY = 1.2f
